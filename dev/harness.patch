@@ -5,19 +5,19 @@ index 9e3f03eefc9..88c9c44ae71 100644
 @@ -42,0 +43,7 @@
 +    # Pi-style append-only in-session conversation tree and its tool/commands.
 +    - id: pi-agent-session-tree
-+      name: '@robiteame/dsh-pi-agent-session-tree'
++      name: '@ryanlee2007/dsh-pi-agent-session-tree'
 +
 +    - id: tool-session-tree
-+      name: '@robiteame/dsh-tool-session-tree'
++      name: '@ryanlee2007/dsh-tool-session-tree'
 +
 diff --git a/packages/bundle/base/package.json b/packages/bundle/base/package.json
 index fa80fcfb555..121f1a106ab 100644
 --- a/packages/bundle/base/package.json
 +++ b/packages/bundle/base/package.json
 @@ -70,0 +71 @@
-+    "@robiteame/dsh-pi-agent-session-tree": "workspace:*",
++    "@ryanlee2007/dsh-pi-agent-session-tree": "workspace:*",
 @@ -103,0 +105 @@
-+    "@robiteame/dsh-tool-session-tree": "workspace:*",
++    "@ryanlee2007/dsh-tool-session-tree": "workspace:*",
 diff --git a/packages/bundle/web-app/cordis.patch.yml b/packages/bundle/web-app/cordis.patch.yml
 index 987df7c3f7d..4407fb93d26 100644
 --- a/packages/bundle/web-app/cordis.patch.yml
@@ -25,14 +25,14 @@ index 987df7c3f7d..4407fb93d26 100644
 @@ -323,0 +324,4 @@
 +    # Pi-style session tree in the official right Sidebar.
 +    - id: ui-session-tree
-+      name: '@robiteame/dsh-client-ui-session-tree'
++      name: '@ryanlee2007/dsh-client-ui-session-tree'
 +
 diff --git a/packages/bundle/web-app/package.json b/packages/bundle/web-app/package.json
 index deb1a2ac053..d9814b6e24c 100644
 --- a/packages/bundle/web-app/package.json
 +++ b/packages/bundle/web-app/package.json
 @@ -95,0 +96 @@
-+    "@robiteame/dsh-client-ui-session-tree": "workspace:*",
++    "@ryanlee2007/dsh-client-ui-session-tree": "workspace:*",
 diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
 index 98e9be027b8..ba1a4022da7 100644
 --- a/pnpm-workspace.yaml
@@ -47,11 +47,11 @@ index 4ad99dbb893..1b65472b427 100644
 --- a/tsconfig.base.json
 +++ b/tsconfig.base.json
 @@ -342,0 +343,5 @@
-+      "@robiteame/dsh-pi-agent-session-tree": ["./packages/extensions/pi-agent-session-tree/src"],
-+      "@robiteame/dsh-pi-agent-session-tree/client": ["./packages/extensions/pi-agent-session-tree/src/client.ts"],
-+      "@robiteame/dsh-tool-session-tree": ["./packages/extensions/tool-session-tree/src"],
-+      "@robiteame/dsh-client-ui-session-tree": ["./packages/client/ui-session-tree/src"],
-+      "@robiteame/dsh-client-ui-session-tree/client": ["./packages/client/ui-session-tree/src/client"],
++      "@ryanlee2007/dsh-pi-agent-session-tree": ["./packages/extensions/pi-agent-session-tree/src"],
++      "@ryanlee2007/dsh-pi-agent-session-tree/client": ["./packages/extensions/pi-agent-session-tree/src/client.ts"],
++      "@ryanlee2007/dsh-tool-session-tree": ["./packages/extensions/tool-session-tree/src"],
++      "@ryanlee2007/dsh-client-ui-session-tree": ["./packages/client/ui-session-tree/src"],
++      "@ryanlee2007/dsh-client-ui-session-tree/client": ["./packages/client/ui-session-tree/src/client"],
 diff --git a/tsconfig.client.json b/tsconfig.client.json
 index a8f0a9ed96d..847d804d187 100644
 --- a/tsconfig.client.json

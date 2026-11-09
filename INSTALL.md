@@ -5,7 +5,7 @@
 ### DeepSeek Harness Desktop
 
 Open **Settings → Plugins → Market**, search for
-`@robiteame/dsh-session-tree` after it is published, or install the bundled
+`@ryanlee2007/dsh-session-tree` after it is published, or install the bundled
 tarball from the release page, then restart the app. The desktop
 plugin manager activates the carrier bundle and composes its three rows; after
 the restart, `/tree` opens the panel.
@@ -20,7 +20,7 @@ The supported CLI install is one command against your profile; the
 `0.2.2-rc.1` plugin manager activates the newly installed bundle:
 
 ```sh
-dsh plugin --profile <profile> add @robiteame/dsh-session-tree
+dsh plugin --profile <profile> add @ryanlee2007/dsh-session-tree
 ```
 
 or, fully offline, with the prebuilt tarball (no install scripts, no build
@@ -31,8 +31,8 @@ dsh plugin --profile <profile> add robiteame-dsh-session-tree-0.1.0.tgz
 ```
 
 The carrier package pulls its three implementation packages
-(`@robiteame/dsh-pi-agent-session-tree`, `@robiteame/dsh-tool-session-tree`,
-`@robiteame/dsh-client-ui-session-tree`) as dependencies and mounts them
+(`@ryanlee2007/dsh-pi-agent-session-tree`, `@ryanlee2007/dsh-tool-session-tree`,
+`@ryanlee2007/dsh-client-ui-session-tree`) as dependencies and mounts them
 through its `cordis.patch.yml` composition layer. After the install, restart
 the profile and check the composition:
 
@@ -59,7 +59,7 @@ tree. `session_tree`'s `context`/`session` operations report the active
 Desktop: remove the plugin from the in-app market. CLI:
 
 ```sh
-dsh plugin --profile <profile> remove @robiteame/dsh-session-tree
+dsh plugin --profile <profile> remove @ryanlee2007/dsh-session-tree
 ```
 
 The composition rows disappear with the bundle entry; nothing else in the

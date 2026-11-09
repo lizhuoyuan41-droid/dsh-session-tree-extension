@@ -2,7 +2,7 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { JumpView, SessionTreeForkView, SessionTreeView, TreeNode } from '@robiteame/dsh-pi-agent-session-tree/client'
+import type { JumpView, SessionTreeForkView, SessionTreeView, TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import { SessionTreePanel } from './SessionTreePanel.tsx'
 import type { SessionForkLineage } from './fork-lineage.ts'
 import css from './SessionTreePanel.module.css'

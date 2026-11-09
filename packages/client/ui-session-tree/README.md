@@ -58,7 +58,7 @@ seats), so the additive `shell.overlay` entry is the seat for inline rendering.
 
 ```yaml
 - id: ui-session-tree
-  name: '@robiteame/dsh-client-ui-session-tree'
+  name: '@ryanlee2007/dsh-client-ui-session-tree'
 ```
 
 The official standalone Bundle already supplies both Host services and this

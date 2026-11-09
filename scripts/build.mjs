@@ -12,15 +12,15 @@ const TOOL = resolve(ROOT, 'packages/extensions/tool-session-tree')
 const UI = resolve(ROOT, 'packages/client/ui-session-tree')
 const TEMP = resolve(ROOT, '.bundle-build')
 
-const PI_NAME = '@robiteame/dsh-pi-agent-session-tree'
-const UI_NAME = '@robiteame/dsh-client-ui-session-tree'
+const PI_NAME = '@ryanlee2007/dsh-pi-agent-session-tree'
+const UI_NAME = '@ryanlee2007/dsh-client-ui-session-tree'
 
 const requested = process.argv.slice(2).filter(arg => !arg.startsWith('--'))
 const targets = requested.length > 0 ? requested : ['pi', 'tool', 'ui']
 
 mkdirSync(TEMP, { recursive: true })
 
-const hostExternal = ['@deepseek-ai/*', '@robiteame/*', 'zod']
+const hostExternal = ['@deepseek-ai/*', '@ryanlee2007/*', 'zod']
 
 const common = {
   bundle: true,

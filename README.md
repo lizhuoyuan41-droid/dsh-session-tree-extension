@@ -1,6 +1,6 @@
 # dsh-session-tree
 
-[![npm](https://img.shields.io/npm/v/@robiteame/dsh-session-tree)](https://www.npmjs.com/package/@robiteame/dsh-session-tree)
+[![npm](https://img.shields.io/npm/v/@ryanlee2007/dsh-session-tree)](https://www.npmjs.com/package/@ryanlee2007/dsh-session-tree)
 [![CI](https://github.com/lizhuoyuan41-droid/dsh-session-tree-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/lizhuoyuan41-droid/dsh-session-tree-extension/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Harness](https://img.shields.io/badge/DeepSeek--Harness-0.2.2--rc.1-orange)](https://github.com/deepseek-ai/deepseek-harness)
@@ -68,17 +68,17 @@ Distributed as four npm-format packages under the `@robiteame` scope:
 
 | Package | Role |
 |---|---|
-| [`@robiteame/dsh-session-tree`](./packages/bundle/session-tree) | Carrier Bundle: one install mounts everything below through its composition layer |
-| [`@robiteame/dsh-pi-agent-session-tree`](./packages/extensions/pi-agent-session-tree) | Host domain service: the `SessionTree`/`SessionTreeStore` domain model and the `sessionTree` Remote |
-| [`@robiteame/dsh-tool-session-tree`](./packages/extensions/tool-session-tree) | Command surface: the `/tree` `/fork` `/clone` commands |
-| [`@robiteame/dsh-client-ui-session-tree`](./packages/client/ui-session-tree) | WebUI tree panel: a native tab in the Harness 0.2 right Sidebar, with an additive overlay fallback for older stock builds |
+| [`@ryanlee2007/dsh-session-tree`](./packages/bundle/session-tree) | Carrier Bundle: one install mounts everything below through its composition layer |
+| [`@ryanlee2007/dsh-pi-agent-session-tree`](./packages/extensions/pi-agent-session-tree) | Host domain service: the `SessionTree`/`SessionTreeStore` domain model and the `sessionTree` Remote |
+| [`@ryanlee2007/dsh-tool-session-tree`](./packages/extensions/tool-session-tree) | Command surface: the `/tree` `/fork` `/clone` commands |
+| [`@ryanlee2007/dsh-client-ui-session-tree`](./packages/client/ui-session-tree) | WebUI tree panel: a native tab in the Harness 0.2 right Sidebar, with an additive overlay fallback for older stock builds |
 
 ## Install (users)
 
 ### DeepSeek Harness Desktop
 
 Open **Settings → Plugins → Market**, search for
-`@robiteame/dsh-session-tree`, install it, and restart the desktop app. The
+`@ryanlee2007/dsh-session-tree`, install it, and restart the desktop app. The
 desktop plugin manager activates the carrier bundle, so the next boot composes
 the three rows (`pi-agent-session-tree`, `tool-session-tree`,
 `ui-session-tree`) that load the Host service, the commands, and the browser
@@ -94,7 +94,7 @@ On a CLI that ships the `0.2.2-rc.1` plugin manager, one command installs and
 activates the bundle:
 
 ```sh
-dsh plugin --profile <profile> add @robiteame/dsh-session-tree
+dsh plugin --profile <profile> add @ryanlee2007/dsh-session-tree
 ```
 
 Prebuilt tarballs install the same way and need no build scripts:

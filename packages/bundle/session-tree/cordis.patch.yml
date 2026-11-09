@@ -3,10 +3,10 @@
 # workspace, where this package's dependencies are installed.
 - insert:
     - id: pi-agent-session-tree
-      name: '@robiteame/dsh-pi-agent-session-tree'
+      name: '@ryanlee2007/dsh-pi-agent-session-tree'
 
     - id: tool-session-tree
-      name: '@robiteame/dsh-tool-session-tree'
+      name: '@ryanlee2007/dsh-tool-session-tree'
 
     - id: ui-session-tree
-      name: '@robiteame/dsh-client-ui-session-tree'
+      name: '@ryanlee2007/dsh-client-ui-session-tree'

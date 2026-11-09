@@ -96,10 +96,10 @@ const _robiteame_dsh_pi_agent_session_tree_sessionTree_session_result$schema = z
 })
 
 const __TYPERT_REMOTE_DESCRIPTORS = {
-  package: '@robiteame/dsh-pi-agent-session-tree',
+  package: '@ryanlee2007/dsh-pi-agent-session-tree',
   descriptors: [
     {
-      id: '@robiteame/dsh-pi-agent-session-tree#sessionTree/fork',
+      id: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/fork',
       service: 'sessionTree',
       namespace: 'sessionTree',
       method: 'fork',
@@ -126,7 +126,7 @@ const __TYPERT_REMOTE_DESCRIPTORS = {
           source: 'json',
           codec: {
             mode: 'strict',
-            typeSymbol: '@robiteame/dsh-pi-agent-session-tree#sessionTree/fork:nodeId',
+            typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/fork:nodeId',
             schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_fork_parameter_1$schema,
           },
         },
@@ -136,20 +136,20 @@ const __TYPERT_REMOTE_DESCRIPTORS = {
           source: 'json',
           codec: {
             mode: 'strict',
-            typeSymbol: '@robiteame/dsh-pi-agent-session-tree#sessionTree/fork:branch',
+            typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/fork:branch',
             schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_fork_parameter_2$schema,
           },
         },
       ],
       result: {
         mode: 'strict',
-        typeSymbol: '@robiteame/dsh-pi-agent-session-tree#sessionTree/fork:result',
+        typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/fork:result',
         schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_fork_result$schema,
       },
       sourceLocation: {"file":"packages/extensions/pi-agent-session-tree/src/index.ts","line":188,"column":3},
     },
     {
-      id: '@robiteame/dsh-pi-agent-session-tree#sessionTree/forkSession',
+      id: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/forkSession',
       service: 'sessionTree',
       namespace: 'sessionTree',
       method: 'forkSession',
@@ -176,7 +176,7 @@ const __TYPERT_REMOTE_DESCRIPTORS = {
           source: 'json',
           codec: {
             mode: 'strict',
-            typeSymbol: '@robiteame/dsh-pi-agent-session-tree#sessionTree/forkSession:nodeId',
+            typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/forkSession:nodeId',
             schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_forkSession_parameter_1$schema,
           },
         },
@@ -186,20 +186,20 @@ const __TYPERT_REMOTE_DESCRIPTORS = {
           source: 'json',
           codec: {
             mode: 'strict',
-            typeSymbol: '@robiteame/dsh-pi-agent-session-tree#sessionTree/forkSession:branch',
+            typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/forkSession:branch',
             schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_forkSession_parameter_2$schema,
           },
         },
       ],
       result: {
         mode: 'strict',
-        typeSymbol: '@robiteame/dsh-pi-agent-session-tree#sessionTree/forkSession:result',
+        typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/forkSession:result',
         schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_fork_result$schema,
       },
       sourceLocation: {"file":"packages/extensions/pi-agent-session-tree/src/index.ts","line":645,"column":3},
     },
     {
-      id: '@robiteame/dsh-pi-agent-session-tree#sessionTree/jump',
+      id: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/jump',
       service: 'sessionTree',
       namespace: 'sessionTree',
       method: 'jump',
@@ -226,20 +226,20 @@ const __TYPERT_REMOTE_DESCRIPTORS = {
           source: 'json',
           codec: {
             mode: 'strict',
-            typeSymbol: '@robiteame/dsh-pi-agent-session-tree#sessionTree/jump:nodeId',
+            typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/jump:nodeId',
             schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_jump_parameter_1$schema,
           },
         },
       ],
       result: {
         mode: 'strict',
-        typeSymbol: '@robiteame/dsh-pi-agent-session-tree/client#JumpView',
+        typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree/client#JumpView',
         schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_jump_result$schema,
       },
       sourceLocation: {"file":"packages/extensions/pi-agent-session-tree/src/index.ts","line":158,"column":3},
     },
     {
-      id: '@robiteame/dsh-pi-agent-session-tree#sessionTree/list',
+      id: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/list',
       service: 'sessionTree',
       namespace: 'sessionTree',
       method: 'list',
@@ -263,13 +263,13 @@ const __TYPERT_REMOTE_DESCRIPTORS = {
       ],
       result: {
         mode: 'strict',
-        typeSymbol: '@robiteame/dsh-pi-agent-session-tree/client#SessionTreeView',
+        typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree/client#SessionTreeView',
         schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_list_result$schema,
       },
       sourceLocation: {"file":"packages/extensions/pi-agent-session-tree/src/index.ts","line":132,"column":3},
     },
     {
-      id: '@robiteame/dsh-pi-agent-session-tree#sessionTree/session',
+      id: '@ryanlee2007/dsh-pi-agent-session-tree#sessionTree/session',
       service: 'sessionTree',
       namespace: 'sessionTree',
       method: 'session',
@@ -293,7 +293,7 @@ const __TYPERT_REMOTE_DESCRIPTORS = {
       ],
       result: {
         mode: 'strict',
-        typeSymbol: '@robiteame/dsh-pi-agent-session-tree/client#SessionTreeSessionInfo',
+        typeSymbol: '@ryanlee2007/dsh-pi-agent-session-tree/client#SessionTreeSessionInfo',
         schema: _robiteame_dsh_pi_agent_session_tree_sessionTree_session_result$schema,
       },
       sourceLocation: {"file":"packages/extensions/pi-agent-session-tree/src/index.ts","line":211,"column":3},

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { TreeNode } from '@robiteame/dsh-pi-agent-session-tree/client'
+import type { TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import {
   navigationStatus,
   rememberedSelection,

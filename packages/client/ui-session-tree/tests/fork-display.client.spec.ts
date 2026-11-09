@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { SessionTreeView, TreeNode } from '@robiteame/dsh-pi-agent-session-tree/client'
+import type { SessionTreeView, TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import { buildBranchTreeModel, buildSessionGraphModel, firstUnsharedUserNode, focusSessionGraph } from '../src/client/session-graph.ts'
 
 const sid = (id: string) => id as SessionId

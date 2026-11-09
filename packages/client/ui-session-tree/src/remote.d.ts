@@ -7,7 +7,7 @@
  * node_modules, so standalone checks resolve the same default export here.
  * `scripts/build.mjs` still bundles the generated runtime template.
  */
-declare module '@robiteame/dsh-pi-agent-session-tree/remote' {
+declare module '@ryanlee2007/dsh-pi-agent-session-tree/remote' {
   const TYPERT_REMOTE: Record<string, unknown>
   export default TYPERT_REMOTE
 }

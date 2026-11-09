@@ -37,10 +37,10 @@ import SessionTreeService, {
   supportsDurableSessionTreeEvents,
   supportsSelectedMessageSurface,
   syncSessionTree,
-} from '@robiteame/dsh-pi-agent-session-tree'
-import type { SessionTreeSnapshot, TreeNode } from '@robiteame/dsh-pi-agent-session-tree'
-import { sessionEventsToTreeNodes } from '@robiteame/dsh-pi-agent-session-tree'
-import * as toolSessionTree from '@robiteame/dsh-tool-session-tree'
+} from '@ryanlee2007/dsh-pi-agent-session-tree'
+import type { SessionTreeSnapshot, TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree'
+import { sessionEventsToTreeNodes } from '@ryanlee2007/dsh-pi-agent-session-tree'
+import * as toolSessionTree from '@ryanlee2007/dsh-tool-session-tree'
 
 const testToolSignal = new AbortController().signal
 const testSidecarRoot = mkdtempSync(join(tmpdir(), 'dsh-session-tree-sidecar-'))
@@ -534,12 +534,12 @@ describe('session_tree tool: append-only history', () => {
   })
 
   it('exports and replays append-only log records', async () => {
-    const tree = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-log'))
+    const tree = new (await import('@ryanlee2007/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-log'))
     const first = tree.append({ role: 'user', content: 'one' })
     expect(first.ok).toBe(true)
     const records = tree.log()
     expect(records).toHaveLength(1)
-    const restored = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-log-restored'))
+    const restored = new (await import('@ryanlee2007/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-log-restored'))
     const result = restored.replay(records)
     expect(result).toEqual({ ok: true, value: { applied: 1 } })
     expect(restored.list()[0]?.message?.content).toBe('one')
@@ -552,13 +552,13 @@ describe('session_tree tool: append-only history', () => {
   })
 
   it('replays a branched append-only node log without deleting either path', async () => {
-    const tree = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-mixed-log'))
+    const tree = new (await import('@ryanlee2007/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-mixed-log'))
     const root = expectOk(tree.append({ role: 'user', content: 'root' })) as TreeNode
     const main = expectOk(tree.append({ role: 'assistant', content: 'main answer' })) as TreeNode
     expect(tree.jump(root.nodeId).ok).toBe(true)
     const alternative = expectOk(tree.append({ role: 'assistant', content: 'alternative answer' })) as TreeNode
     const records = tree.log()
-    const restored = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-mixed-restored'))
+    const restored = new (await import('@ryanlee2007/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-mixed-restored'))
     expect(restored.replay(records)).toEqual({ ok: true, value: { applied: 3 } })
     expect(restored.list().map(node => node.nodeId)).toEqual([root.nodeId, main.nodeId, alternative.nodeId])
     expect(restored.list().find(node => node.nodeId === main.nodeId)?.parentId).toBe(root.nodeId)
@@ -588,14 +588,14 @@ describe('session_tree tool: append-only history', () => {
   })
 
   it('preserves the native event watermark in snapshots and accepts legacy snapshots', async () => {
-    const tree = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-watermark'))
+    const tree = new (await import('@ryanlee2007/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-watermark'))
     tree.markSessionEventSeq(17)
     const snapshot = tree.snapshot()
     expect(snapshot.nativeEventSeq).toBe(17)
-    const restored = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-watermark'), snapshot)
+    const restored = new (await import('@ryanlee2007/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-watermark'), snapshot)
     expect(restored.lastSessionEventSeq()).toBe(17)
     const legacy = { ...snapshot, nativeEventSeq: undefined }
-    const legacyRestored = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-legacy'), { ...legacy, sessionId: 'tree-legacy' })
+    const legacyRestored = new (await import('@ryanlee2007/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-legacy'), { ...legacy, sessionId: 'tree-legacy' })
     expect(legacyRestored.lastSessionEventSeq()).toBe(-1)
   })
 

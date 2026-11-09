@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { SessionTreeView, TreeNode } from '@robiteame/dsh-pi-agent-session-tree/client'
+import type { SessionTreeView, TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import {
   SessionTreeOverlay,
   SessionTreeOverlayController,

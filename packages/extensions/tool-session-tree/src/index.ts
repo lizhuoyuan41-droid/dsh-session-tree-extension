@@ -2,7 +2,7 @@
  * Model-facing tool and slash-command companion of the session-tree service:
  * the `session_tree` tool, the `/tree` command family, and a system-prompt
  * section. All state lives in the shared `sessionTreeStore` from
- * `@robiteame/dsh-pi-agent-session-tree`, so the model, the command line,
+ * `@ryanlee2007/dsh-pi-agent-session-tree`, so the model, the command line,
  * and the browser panel observe the same trees.
  *
  * Design notes
@@ -13,7 +13,7 @@
  *   envelope; a thrown body also settles as that envelope, so tool results
  *   are always lossless JSON.
  *
- * @module @robiteame/dsh-tool-session-tree
+ * @module @ryanlee2007/dsh-tool-session-tree
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -22,8 +22,8 @@ import type {} from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
-import { appendSessionTreeEvent, applyTreeCursorToSession, isInjectedUserNode, isSessionTreeRestoreEvent, persistSessionTree, SessionTree, sessionTreeStore, sessionTreeSurfaceMode, supportsDurableSessionTreeEvents, syncSessionTree } from '@robiteame/dsh-pi-agent-session-tree'
-import type { JsonValue } from '@robiteame/dsh-pi-agent-session-tree'
+import { appendSessionTreeEvent, applyTreeCursorToSession, isInjectedUserNode, isSessionTreeRestoreEvent, persistSessionTree, SessionTree, sessionTreeStore, sessionTreeSurfaceMode, supportsDurableSessionTreeEvents, syncSessionTree } from '@ryanlee2007/dsh-pi-agent-session-tree'
+import type { JsonValue } from '@ryanlee2007/dsh-pi-agent-session-tree'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 
@@ -425,9 +425,9 @@ function runSessionCommand(invocation: CommandInvocation): CommandResult {
   return jsonCommand({ ok: true, value: { ...syncSessionTree(invocation.agent).info(), surface: sessionTreeSurfaceMode(invocation.agent.session) } })
 }
 
-function jsonCommand(value: unknown, map?: (tree: import('@robiteame/dsh-pi-agent-session-tree').SessionTree) => unknown): CommandResult {
-  const result = map === undefined ? value : (value as { ok: boolean; value?: import('@robiteame/dsh-pi-agent-session-tree').SessionTree }).ok
-    ? map((value as { value: import('@robiteame/dsh-pi-agent-session-tree').SessionTree }).value)
+function jsonCommand(value: unknown, map?: (tree: import('@ryanlee2007/dsh-pi-agent-session-tree').SessionTree) => unknown): CommandResult {
+  const result = map === undefined ? value : (value as { ok: boolean; value?: import('@ryanlee2007/dsh-pi-agent-session-tree').SessionTree }).ok
+    ? map((value as { value: import('@ryanlee2007/dsh-pi-agent-session-tree').SessionTree }).value)
     : value
   const failed = typeof result === 'object' && result !== null && (result as { ok?: unknown }).ok === false
   return { kind: failed ? 'error' : 'success', text: JSON.stringify(result) }

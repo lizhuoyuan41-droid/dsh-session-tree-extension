@@ -2,7 +2,7 @@
   "name": "dsh-session-tree-extension",
   "version": "0.1.0",
   "private": true,
-  "description": "Development workspace for the dsh-session-tree plugin packages (not published)",
+  "description": "Independent release workspace for the @ryanlee2007/dsh-session-tree packages.",
   "type": "module",
   "packageManager": "pnpm@11.15.1",
   "dsh": {
@@ -16,7 +16,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --project tsconfig.check.host.json && tsc --project tsconfig.check.client.json",
     "verify": "pnpm build && pnpm typecheck && node scripts/verify-bundle.mjs --pack && pnpm test:coverage",
-    "pack:all": "pnpm build && node scripts/verify-bundle.mjs && pnpm --filter @robiteame/dsh-pi-agent-session-tree pack && pnpm --filter @robiteame/dsh-tool-session-tree pack && pnpm --filter @robiteame/dsh-client-ui-session-tree pack && pnpm --filter @robiteame/dsh-session-tree pack"
+    "pack:all": "pnpm build && node scripts/verify-bundle.mjs && pnpm --filter @ryanlee2007/dsh-pi-agent-session-tree pack && pnpm --filter @ryanlee2007/dsh-tool-session-tree pack && pnpm --filter @ryanlee2007/dsh-client-ui-session-tree pack && pnpm --filter @ryanlee2007/dsh-session-tree pack"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
@@ -54,7 +54,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "@ryanlee2007/dsh-pi-agent-session-tree": "workspace:*"
   },
   "engines": {
     "node": ">=22"

@@ -3,7 +3,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import sessionTreeRemote from '@robiteame/dsh-pi-agent-session-tree/remote'
+import sessionTreeRemote from '@ryanlee2007/dsh-pi-agent-session-tree/remote'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -19,7 +19,7 @@ declare module '@deepseek-ai/cordis' {
     'command/executed'(sessionId: SessionId, name: string, result: CommandResult): void
   }
 }
-import type { SessionTreeForkView, SessionTreeView, TreeNode } from '@robiteame/dsh-pi-agent-session-tree/client'
+import type { SessionTreeForkView, SessionTreeView, TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import { nodeFullText, isInjectedUserSource } from './node-text.ts'
 import { SessionForkLineage, browserForkLineageStorage, summarizeForkPrompt } from './fork-lineage.ts'
 import type { SessionTreePanelActions } from './slots.ts'
@@ -408,7 +408,7 @@ function registerSessionTreeUi(ctx: ClientContext): void {
   if (sidebarRightTabs !== undefined && sidebarRight !== undefined) {
     // DeepSeek-Harness 0.2 ships an extensible right Sidebar. Register a page
     // type there so /tree docks into the product's own persistent surface.
-    const SESSION_TREE_TAB_ID = '@robiteame/dsh-client-ui-session-tree'
+    const SESSION_TREE_TAB_ID = '@ryanlee2007/dsh-client-ui-session-tree'
     const translate = typeof ctx.locale.bind === 'function'
       ? ctx.locale.bind(NS)
       : (key: SessionTreeKey) => zh[key]

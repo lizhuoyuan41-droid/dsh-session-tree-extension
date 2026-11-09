@@ -1,7 +1,7 @@
 #!/bin/sh
 # Developer source integration: install the session-tree packages into a
 # DeepSeek-Harness checkout. User-facing installs go through the published
-# @robiteame/dsh-session-tree carrier bundle instead (see the repository
+# @ryanlee2007/dsh-session-tree carrier bundle instead (see the repository
 # README); this script exists for hacking on the plugin against Harness
 # source.
 set -eu
@@ -26,11 +26,11 @@ surface_patch_is_applied() {
 
 harness_patch_is_applied() {
   [ "$(count_marker packages/bundle/base/cordis.patch.yml '# Pi-style append-only in-session conversation tree and its tool/commands.')" = "1" ] &&
-    [ "$(count_marker packages/bundle/base/package.json '"@robiteame/dsh-pi-agent-session-tree": "workspace:*",')" = "1" ] &&
+    [ "$(count_marker packages/bundle/base/package.json '"@ryanlee2007/dsh-pi-agent-session-tree": "workspace:*",')" = "1" ] &&
     [ "$(count_marker packages/bundle/web-app/cordis.patch.yml '# Pi-style session tree in the official right Sidebar.')" = "1" ] &&
-    [ "$(count_marker packages/bundle/web-app/package.json '"@robiteame/dsh-client-ui-session-tree": "workspace:*",')" = "1" ] &&
+    [ "$(count_marker packages/bundle/web-app/package.json '"@ryanlee2007/dsh-client-ui-session-tree": "workspace:*",')" = "1" ] &&
     [ "$(count_marker pnpm-workspace.yaml '# Source-integrated @robiteame packages resolve their semver peer/dependency')" = "1" ] &&
-    [ "$(count_marker tsconfig.base.json '"@robiteame/dsh-pi-agent-session-tree/client":')" = "1" ] &&
+    [ "$(count_marker tsconfig.base.json '"@ryanlee2007/dsh-pi-agent-session-tree/client":')" = "1" ] &&
     [ "$(count_marker tsconfig.client.json '{ "path": "./packages/client/ui-session-tree" },')" = "1" ] &&
     [ "$(count_marker tsconfig.host.json '{ "path": "./packages/extensions/pi-agent-session-tree" },')" = "1" ]
 }

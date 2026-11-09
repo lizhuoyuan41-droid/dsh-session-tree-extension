@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 Model-facing companion of the session-tree service: the `session_tree` tool,
 the `/tree` command family, and a system-prompt section over the shared
 append-only session-tree store. All state lives in
-`sessionTreeStore` (`@robiteame/dsh-pi-agent-session-tree`), so the model,
+`sessionTreeStore` (`@ryanlee2007/dsh-pi-agent-session-tree`), so the model,
 the command line, and the browser panel observe the same trees.
 
 ## Surfaces

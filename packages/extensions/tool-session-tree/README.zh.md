@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-会话树服务的模型面配套：`session_tree` 工具、`/tree` 命令族，以及共享只追加会话树存储之上的 system-prompt 片段。所有状态都在 `sessionTreeStore`（`@robiteame/dsh-pi-agent-session-tree`）中，因此模型、命令行与浏览器面板观察到同一批树。
+会话树服务的模型面配套：`session_tree` 工具、`/tree` 命令族，以及共享只追加会话树存储之上的 system-prompt 片段。所有状态都在 `sessionTreeStore`（`@ryanlee2007/dsh-pi-agent-session-tree`）中，因此模型、命令行与浏览器面板观察到同一批树。
 
 ## 表面
 

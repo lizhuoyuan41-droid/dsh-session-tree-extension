@@ -14,7 +14,7 @@ import type {
   SessionTreeForkView,
   SessionTreeView,
   TreeNode,
-} from '@robiteame/dsh-pi-agent-session-tree/client'
+} from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import type { SessionTreeViewProps } from './slots.ts'
 import type { SessionTreeKey } from './locales.ts'
 import { isInjectedUserNode, nodeFullText } from './node-text.ts'

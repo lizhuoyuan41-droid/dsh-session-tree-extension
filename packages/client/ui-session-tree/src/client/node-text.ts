@@ -1,4 +1,4 @@
-import type { TreeNode } from '@robiteame/dsh-pi-agent-session-tree/client'
+import type { TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 
 /**
  * Browser-side twin of the host adapter's `isInjectedUserSource` (the client

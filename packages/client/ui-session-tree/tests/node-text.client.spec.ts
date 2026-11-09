@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { TreeNode } from '@robiteame/dsh-pi-agent-session-tree/client'
+import type { TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import { nodeFullText } from '../src/client/node-text.ts'
 
 const base: TreeNode = {

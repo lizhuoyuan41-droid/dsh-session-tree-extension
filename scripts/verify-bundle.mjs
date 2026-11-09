@@ -14,10 +14,10 @@ const TOOL = 'packages/extensions/tool-session-tree'
 const UI = 'packages/client/ui-session-tree'
 const CARRIER = 'packages/bundle/session-tree'
 
-const PI_NAME = '@robiteame/dsh-pi-agent-session-tree'
-const TOOL_NAME = '@robiteame/dsh-tool-session-tree'
-const UI_NAME = '@robiteame/dsh-client-ui-session-tree'
-const CARRIER_NAME = '@robiteame/dsh-session-tree'
+const PI_NAME = '@ryanlee2007/dsh-pi-agent-session-tree'
+const TOOL_NAME = '@ryanlee2007/dsh-tool-session-tree'
+const UI_NAME = '@ryanlee2007/dsh-client-ui-session-tree'
+const CARRIER_NAME = '@ryanlee2007/dsh-session-tree'
 
 const checks = [
   {
@@ -51,7 +51,7 @@ const checks = [
     },
     manifest: {
       'dsh.bundle.patch': m => m.dsh?.bundle?.patch === undefined,
-      peers: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-commands', '@deepseek-ai/dsh-session', '@robiteame/dsh-pi-agent-session-tree'],
+      peers: ['@deepseek-ai/cordis', '@deepseek-ai/dsh-commands', '@deepseek-ai/dsh-session', '@ryanlee2007/dsh-pi-agent-session-tree'],
       deps: [],
     },
   },

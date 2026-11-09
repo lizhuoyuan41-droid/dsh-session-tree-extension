@@ -5,7 +5,7 @@
  *
  * Design notes
  * - A process-wide store keeps every session's tree; the companion
- *   `@robiteame/dsh-tool-session-tree` plugin shares the same store, so
+ *   `@ryanlee2007/dsh-tool-session-tree` plugin shares the same store, so
  *   anything the model appends is immediately visible to the browser panel
  *   and vice versa.
  * - Harness Session events are the durable source of truth; the process-wide
@@ -14,7 +14,7 @@
  * - Every operation answers `{ok, value}|{ok:false,error}` from the domain
  *   layer; the Remote boundary adds its own transport envelope.
  *
- * @module @robiteame/dsh-pi-agent-session-tree
+ * @module @ryanlee2007/dsh-pi-agent-session-tree
  */
 
 import type { Context } from '@deepseek-ai/cordis'

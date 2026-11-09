@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentType } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { SessionTreeView, TreeNode } from '@robiteame/dsh-pi-agent-session-tree/client'
+import type { SessionTreeView, TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import { zh } from '../src/client/locales.ts'
 import { SessionTreeDock } from '../src/client/SessionTreePanel.tsx'
 import { SessionTreeSidebarTab } from '../src/client/SessionTreeSidebarTab.tsx'
@@ -238,7 +238,7 @@ describe('session tree browser plugin', () => {
   it('uses the 0.2 native right-Sidebar tab without replacing Tool details', async () => {
     const b = await bench()
     await b.fiber.await()
-    expect(b.entry()?.options).toMatchObject({ key: '@robiteame/dsh-client-ui-session-tree' })
+    expect(b.entry()?.options).toMatchObject({ key: '@ryanlee2007/dsh-client-ui-session-tree' })
     expect(b.overlayEntry()?.options).toMatchObject({ id: 'session-tree', order: 10 })
     expect(b.ctx.slots.entries('details' as never)[0]?.component).toBe(b.toolDetails)
     expect(b.ctx.slots.entries('conversation.input.dock' as never)).toHaveLength(0)

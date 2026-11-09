@@ -57,10 +57,10 @@ Add the host row to the active Cordis composition (the standalone Bundle's
 
 ```yaml
 - id: pi-agent-session-tree
-  name: '@robiteame/dsh-pi-agent-session-tree'
+  name: '@ryanlee2007/dsh-pi-agent-session-tree'
 ```
 
-The browser panel ships as `@robiteame/dsh-client-ui-session-tree`. A patched
+The browser panel ships as `@ryanlee2007/dsh-client-ui-session-tree`. A patched
 checkout mounts it as `conversation.details.panel`; an official Bundle mounts
 it as the additive `shell.overlay`. See `SYSTEM_PROMPT.md` for the
 system-prompt fragment this plugin installs.
@@ -87,7 +87,7 @@ system-prompt fragment this plugin installs.
 
 #### What the model sees
 
-The domain service registers no prompt, schema, or result of its own: the model-facing surface is entirely owned by `@robiteame/dsh-tool-session-tree` (tool, `/tree` command, system-prompt section). The Remote methods this package exposes serve the browser panel only and never enter model context.
+The domain service registers no prompt, schema, or result of its own: the model-facing surface is entirely owned by `@ryanlee2007/dsh-tool-session-tree` (tool, `/tree` command, system-prompt section). The Remote methods this package exposes serve the browser panel only and never enter model context.
 
 #### Token effect
 

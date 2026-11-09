@@ -6,7 +6,7 @@
     "declaration": true,
     "emitDeclarationOnly": true,
     "paths": {
-      "@robiteame/dsh-pi-agent-session-tree": [
+      "@ryanlee2007/dsh-pi-agent-session-tree": [
         "../pi-agent-session-tree/lib/types/index.d.ts"
       ]
     }

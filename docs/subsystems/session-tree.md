@@ -167,7 +167,7 @@ type TreeResult<T> =
 
 ## Surfaces
 
-- `session_tree` tool (`@robiteame/dsh-tool-session-tree`): `create`,
+- `session_tree` tool (`@ryanlee2007/dsh-tool-session-tree`): `create`,
   `append`, `list`, `branches`, `tree`, `jump`, `fork`, `clone`, `context`,
   `session`, `branch`, `branch.summary`, `snapshot.save`, `snapshot.load`,
   `sessions`.
@@ -176,11 +176,11 @@ type TreeResult<T> =
   `/fork` opens a user-prompt selector and copies the selected root path into
   a new same-project session; `/clone` duplicates the whole current session
   into another same-project session.
-- `sessionTree` Remote service (`@robiteame/dsh-pi-agent-session-tree`):
+- `sessionTree` Remote service (`@ryanlee2007/dsh-pi-agent-session-tree`):
   `list(agent)`, `jump(agent, nodeId)`, `fork(agent, nodeId, branch)`,
   `forkSession(agent, nodeId, branch)`, and `session(agent)` drive the browser
   panel; `forkSession` is the user-facing independent-copy operation.
-- `@robiteame/dsh-client-ui-session-tree`: in a patched source checkout it
+- `@ryanlee2007/dsh-client-ui-session-tree`: in a patched source checkout it
   occupies the native `conversation.details.panel` seat; in an official Web
   profile it uses the additive `shell.overlay` seat. `/tree` opens or refreshes
   the panel, and node clicks bind the selected command context. The panel

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { sessionPrefixForkSeed } from '@robiteame/dsh-pi-agent-session-tree'
+import { sessionPrefixForkSeed } from '@ryanlee2007/dsh-pi-agent-session-tree'
 const dir=process.argv[2]
 const text=execFileSync('zstd',['-dc',dir],{encoding:'utf8',maxBuffer:512*1024*1024})
 const all=text.split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l))

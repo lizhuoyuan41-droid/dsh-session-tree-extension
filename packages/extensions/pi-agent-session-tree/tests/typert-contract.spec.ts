@@ -51,7 +51,7 @@ describe('Typert 0.2.1 artifact contract', () => {
       package: string
       methods: Record<string, { parameters?: readonly { wire: string; codec: Codec }[]; result: Codec }>
     }
-    expect(remote.package).toBe('@robiteame/dsh-pi-agent-session-tree')
+    expect(remote.package).toBe('@ryanlee2007/dsh-pi-agent-session-tree')
     expect(Object.keys(remote.methods).sort()).toStrictEqual([
       'sessionTree/fork',
       'sessionTree/forkSession',

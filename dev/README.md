@@ -26,7 +26,7 @@ first-class `ToolResultMessage.toolCallId` shape, and extends the selected path
 from `Session.commit()` after the event enters the log.
 
 **This patch is development-only.** The published packages never require it:
-`@robiteame/dsh-pi-agent-session-tree` capability-detects the API at runtime
+`@ryanlee2007/dsh-pi-agent-session-tree` capability-detects the API at runtime
 (`typeof session.selectMessageSurface === 'function'`). Without the patch the
 plugin runs in stock-surface emulation mode on official builds (an official
 empty `replace` surface event plus the plugin-owned sidecar; `/tree` outputs
@@ -41,7 +41,7 @@ TODO)*
 
 The remaining source-integration changes: `dsh-base`/`dsh-web-app` composition
 rows and dependencies for the three packages, `tsconfig.base.json` paths, and
-host/client project references. Rows reference the `@robiteame/*` package
+host/client project references. Rows reference the `@ryanlee2007/*` package
 names; project references point at each package's `tsconfig.harness.json`.
 Current official WebUI builds already expose the right-Sidebar extension API,
 so no UI source or generated catalog patch is needed.

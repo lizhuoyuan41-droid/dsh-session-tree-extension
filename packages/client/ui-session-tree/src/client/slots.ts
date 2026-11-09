@@ -1,6 +1,6 @@
 /** Session tree's injected face for the right details-sidebar panel seat. */
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { JumpView, SessionTreeForkView, SessionTreeView, TreeNode } from '@robiteame/dsh-pi-agent-session-tree/client'
+import type { JumpView, SessionTreeForkView, SessionTreeView, TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionForkLineage } from './fork-lineage.ts'
 

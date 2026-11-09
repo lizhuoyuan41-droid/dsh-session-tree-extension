@@ -80,6 +80,9 @@ importers:
       '@deepseek-ai/dsh-typert-protocol':
         specifier: 0.2.2-rc.1
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
+      '@ryanlee2007/dsh-pi-agent-session-tree':
+        specifier: workspace:*
+        version: link:packages/extensions/pi-agent-session-tree
       '@testing-library/dom':
         specifier: ^10.0.0
         version: 10.4.1
@@ -119,13 +122,13 @@ importers:
 
   packages/bundle/session-tree:
     dependencies:
-      '@robiteame/dsh-client-ui-session-tree':
+      '@ryanlee2007/dsh-client-ui-session-tree':
         specifier: ^0.1.0
         version: link:../../client/ui-session-tree
-      '@robiteame/dsh-pi-agent-session-tree':
+      '@ryanlee2007/dsh-pi-agent-session-tree':
         specifier: ^0.1.0
         version: link:../../extensions/pi-agent-session-tree
-      '@robiteame/dsh-tool-session-tree':
+      '@ryanlee2007/dsh-tool-session-tree':
         specifier: ^0.1.0
         version: link:../../extensions/tool-session-tree
 
