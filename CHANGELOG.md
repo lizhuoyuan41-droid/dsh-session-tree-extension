@@ -1,3 +1,31 @@
+## 0.1.1 — 2026-11-09
+
+### Changed
+
+- First registry release under the independent **`@ryanlee2007`** npm scope.
+  The `@robiteame` 0.1.0 versions were already occupied on npm, so the project
+  now owns its package names and release cadence instead of publishing over
+  another scope. This keeps upgrades, deprecations, and future maintenance
+  predictable for users.
+- All four packages (`dsh-session-tree`, `dsh-pi-agent-session-tree`,
+  `dsh-tool-session-tree`, `dsh-client-ui-session-tree`) now ship together at
+  the same version, with the carrier bundle, imports, and publish scripts
+  updated to the new scope.
+- Declared the client panel's peer dependency on the host session-tree service
+  so the workspace build resolves the Remote contract without hoisting.
+
+### Fixed
+
+- Made the verified native-navigation retry test deterministic on faster
+  Node 24 runners (the simulated page restore now lands before the settle
+  window). This removes the previous CI-only failure on node 24.
+
+### Verified
+
+- Build, host/client type checks, packed-artifact verification, and 199 tests
+  pass on Node 22 and Node 24. GitHub Actions is green for both.
+- Release tarballs are attached to the `v0.1.1` GitHub release.
+
 ## 0.1.0 — 2026-11-09
 
 ### Added

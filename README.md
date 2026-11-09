@@ -100,7 +100,7 @@ dsh plugin --profile <profile> add @ryanlee2007/dsh-session-tree
 Prebuilt tarballs install the same way and need no build scripts:
 
 ```sh
-dsh plugin --profile <profile> add robiteame-dsh-session-tree-0.1.0.tgz
+dsh plugin --profile <profile> add robiteame-dsh-session-tree-0.1.1.tgz
 ```
 
 After installing, restart the profile. Verify the composed layer:

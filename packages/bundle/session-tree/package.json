@@ -1,7 +1,7 @@
 {
   "name": "@ryanlee2007/dsh-session-tree",
   "description": "Carrier bundle for dsh-session-tree: one install mounts the Host service, the session_tree tool/commands, and the WebUI lineage panel.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publishConfig": {
     "access": "public"
   },
@@ -13,9 +13,9 @@
     }
   },
   "dependencies": {
-    "@ryanlee2007/dsh-pi-agent-session-tree": "^0.1.0",
-    "@ryanlee2007/dsh-tool-session-tree": "^0.1.0",
-    "@ryanlee2007/dsh-client-ui-session-tree": "^0.1.0"
+    "@ryanlee2007/dsh-pi-agent-session-tree": "^0.1.1",
+    "@ryanlee2007/dsh-tool-session-tree": "^0.1.1",
+    "@ryanlee2007/dsh-client-ui-session-tree": "^0.1.1"
   },
   "files": [
     "cordis.patch.yml",
