@@ -1,0 +1,280 @@
+/**
+ * Pure projection between Harness SessionEvent logs and SessionTree nodes.
+ * This module does not subscribe to a live Session or persistence service: the
+ * host integration can feed it immutable `session.events` snapshots, while
+ * preserving the Session log as the durable source of truth.
+ */
+import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
+import type { ContentPart, JsonValue, LlmMessage, TreeNode } from './types.ts'
+import { isSessionTreeRestoreEvent } from './session-tree-marker.ts'
+
+/**
+ * Compact result payload of one `tool/result` event: the call correlation,
+ * the flattened result text, and the failure identity when the call errored.
+ */
+export interface ProjectedToolResult {
+  callId: string
+  text: string
+  isError: boolean
+  error?: string
+}
+
+/** Extract the call correlation and outcome of one `tool/result` event. */
+export function toolResultOf(event: SessionEvent): ProjectedToolResult | undefined {
+  if (event.type !== 'tool/result') return undefined
+  const message = event.data.message
+  const failure = event.data.error
+  // 0.2 represents the result as a first-class tool message. Older logs wrap
+  // the same payload in a `tool-result` content block; accept both so stored
+  // histories remain readable after the Harness upgrade.
+  const legacy = Array.isArray(message.content)
+    ? message.content.find(part => (part as { type?: unknown }).type === 'tool-result') as
+      | { toolCallId?: unknown; content?: unknown; isError?: unknown }
+      | undefined
+    : undefined
+  const callId = message.toolCallId ?? legacy?.toolCallId
+  if (callId === undefined) return undefined
+  const isError = message.isError === true || legacy?.isError === true || failure !== undefined
+  return {
+    callId: String(callId),
+    text: textOf(legacy?.content ?? message.content),
+    isError,
+    ...(isError ? { error: failure !== undefined ? `${failure.name}: ${failure.code}` : 'tool call failed' } : {}),
+  }
+}
+
+/**
+ * Whether one `user/message` source marks harness-injected context instead of
+ * a typed human prompt. Producers declare themselves through `source.kind`:
+ * `'user'` is a direct human prompt, while `'plugin'` (skill content,
+ * system-prompt snapshots, file-change notices, approvals, …) and
+ * plugin-extended kinds (`'skill-catalog'`, …) are synthetic `agent.inject()`
+ * context. Legacy logs carry a plain string source or none at all; both
+ * predate injection bookkeeping and stay presented as human input.
+ */
+export function isInjectedUserSource(source: unknown): boolean {
+  if (typeof source !== 'object' || source === null) return false
+  const kind = (source as { kind?: unknown }).kind
+  return typeof kind === 'string' && kind !== 'user'
+}
+
+/**
+ * Whether one tree node records harness-injected context rather than a typed
+ * human prompt (see {@link isInjectedUserSource}). Injected nodes stay in the
+ * append-only projection — jump/fork re-select the model-visible surface from
+ * the tree path, so dropping them would strip the skill catalog and
+ * system-prompt snapshots from later model turns — but every user-facing
+ * surface hides them.
+ */
+export function isInjectedUserNode(node: TreeNode): boolean {
+  return node.metadata?.injected === true
+}
+
+/**
+ * Fold one projected tool result into its tool-call node so the call and its
+ * result read as a single tree entry (matching the model-visible pair). The
+ * function is pure and idempotent: an already-merged node is returned as-is.
+ */
+export function attachToolResult(node: TreeNode, result: ProjectedToolResult, resultEventSeq: number | undefined): TreeNode {
+  const alreadyMerged = node.content?.some(part => part.type === 'tool_result' && part.toolCallId === result.callId) === true
+  if (alreadyMerged) return node
+  const resultPart: ContentPart = {
+    type: 'tool_result',
+    toolCallId: result.callId,
+    content: result.text,
+    ...(result.isError ? { isError: true } : {}),
+  }
+  const base = node.summary.replace(/\.{3}$/u, '').trim()
+  const suffix = result.text.trim() === '' ? (result.error ?? '') : result.text
+  return {
+    ...node,
+    summary: summarize(suffix === '' ? base : `${base} → ${suffix}`),
+    message: { role: 'tool', content: result.text, toolCallId: result.callId },
+    content: [...(node.content ?? []), resultPart],
+    ...(result.error === undefined ? {} : { error: result.error }),
+    metadata: {
+      ...node.metadata,
+      ...(resultEventSeq === undefined ? {} : { toolResultEventSeq: resultEventSeq }),
+    },
+  }
+}
+
+/** Project the message-producing Harness events into an append-only tree. */
+export function sessionEventsToTreeNodes(events: readonly SessionEvent[], initialParentId: string | null = null): TreeNode[] {
+  const nodes: TreeNode[] = []
+  let parentId: string | null = initialParentId
+  // Tool calls pending their result inside this batch: the result folds into
+  // the call node instead of becoming a second history entry.
+  const pendingToolCalls = new Map<string, TreeNode>()
+  let currentTurn: number | undefined
+  for (const event of events) {
+    if (event.type === 'turn/start') {
+      const turn = (event.data as { turn?: unknown }).turn
+      if (typeof turn === 'number') currentTurn = turn
+    }
+    if (event.type === 'tool/result') {
+      const result = toolResultOf(event)
+      if (result !== undefined) {
+        const pending = pendingToolCalls.get(result.callId)
+        if (pending !== undefined) {
+          const index = nodes.indexOf(pending)
+          if (index >= 0) nodes[index] = attachToolResult(pending, result, event.seq)
+          pendingToolCalls.delete(result.callId)
+          continue
+        }
+      }
+    }
+    const projected = projectEvent(event, parentId)
+    if (projected === undefined) continue
+    const withTurn = currentTurn === undefined
+      ? projected
+      : { ...projected, metadata: { ...projected.metadata, turn: currentTurn } }
+    nodes.push(withTurn)
+    parentId = withTurn.nodeId
+    if (event.type === 'tool/call') pendingToolCalls.set(String(event.data.callId), withTurn)
+  }
+  return nodes
+}
+
+function projectEvent(event: SessionEvent, parentId: string | null): TreeNode | undefined {
+  // Stock-mode cursor rewrites are official surface events but carry no
+  // conversation content; the sidecar owns the tree projection they imply.
+  if (isSessionTreeRestoreEvent(event)) return undefined
+  let message: LlmMessage | undefined
+  let content: ContentPart[] | undefined
+  let type: TreeNode['type'] = 'custom'
+  let summary: string = event.type
+  let usage: Record<string, JsonValue> | undefined
+  let model: string | undefined
+  let error: string | undefined
+  let metadata: Record<string, JsonValue> = {
+    sessionEventType: event.type,
+    sessionEventSeq: event.seq,
+    sourceEventSeq: event.seq,
+  }
+
+  if (event.type === 'session-tree/node') {
+    return { ...event.data.node, metadata: { ...event.data.node.metadata, sessionEventType: event.type, sessionEventSeq: event.seq, sourceEventSeq: event.seq } }
+  } else if (event.type === 'session-tree/snapshot') {
+    return undefined
+  } else if (event.type === 'user/message') {
+    type = 'message'
+    message = { role: 'user', content: textOf(event.data.content) }
+    content = partsOf(event.data.content)
+    // An image carries no text; without a marker the node has an empty label and
+    // several image turns become visually indistinguishable/mis-counted.
+    summary = content.some(part => part.type === 'image')
+      ? summarize(`${message.content}［图片］`)
+      : message.content
+    // Harness injections (skill prompts, system-prompt snapshots, context
+    // notices) ride the same event type; the producer-declared source tells
+    // them apart from a typed human prompt.
+    if (isInjectedUserSource(event.data.source)) {
+      metadata = { ...metadata, injected: true }
+    }
+  } else if (event.type === 'assistant/message') {
+    type = 'message'
+    message = { role: 'assistant', content: textOf(event.data.message.content) }
+    content = partsOf(event.data.message.content)
+    summary = message.content
+    if (event.data.usage !== undefined) usage = event.data.usage as unknown as Record<string, JsonValue>
+    if (event.data.interrupted === true) metadata = { ...metadata, interrupted: true }
+  } else if (event.type === 'tool/call') {
+    type = 'tool_call'
+    const args = parseJson(event.data.arguments)
+    content = [{ type: 'tool_call', id: String(event.data.callId), name: event.data.name, arguments: args }]
+    summary = `${event.data.name}(${event.data.arguments})`
+  } else if (event.type === 'request/context') {
+    type = 'model_change'
+    model = event.data.model
+    summary = `model: ${event.data.provider}/${event.data.model}`
+    content = [{ type: 'text', text: summary }]
+  } else if (event.type === 'tool/result') {
+    // Orphan fallback: results normally fold into their tool/call node (see
+    // sessionEventsToTreeNodes / syncSessionTree); this branch keeps a
+    // standalone entry when no matching call was projected.
+    const result = toolResultOf(event)
+    if (result === undefined) return undefined
+    type = 'tool_result'
+    message = { role: 'tool', content: result.text, toolCallId: result.callId }
+    content = [{ type: 'tool_result', toolCallId: result.callId, content: result.text, ...(result.isError ? { isError: true } : {}) }]
+    summary = result.text
+    error = result.error
+  } else {
+    return undefined
+  }
+
+  // Harness represents compaction as a surface replacement on a message event.
+  // Keep it as an immutable tree record instead of pretending the shadowed
+  // messages were deleted from the append-only tree.
+  const surfaceOp = (event as { surfaceOp?: unknown }).surfaceOp
+  if (typeof surfaceOp === 'object' && surfaceOp !== null && (surfaceOp as { op?: unknown }).op === 'replace') {
+    const replacement = surfaceOp as { start?: unknown; end?: unknown; startSeq?: unknown; endSeq?: unknown }
+    const sourceEventSeqs = (event as { sourceEventSeqs?: unknown }).sourceEventSeqs
+    const replaceStart = replacement.startSeq ?? replacement.start
+    const replaceEnd = replacement.endSeq ?? replacement.end
+    type = 'compaction'
+    metadata = {
+      ...metadata,
+      surfaceReplacement: true,
+      ...(typeof replaceStart === 'number' ? { replaceStart } : {}),
+      ...(typeof replaceEnd === 'number' ? { replaceEnd } : {}),
+      sourceEventSeqs: Array.isArray(sourceEventSeqs) ? sourceEventSeqs.filter((seq): seq is number => typeof seq === 'number') : [],
+    }
+    summary = `compaction: ${summary}`
+  }
+
+  return {
+    nodeId: `session-event-${event.seq}`,
+    parentId,
+    forkCount: 0,
+    type,
+    branch: 'main',
+    summary: summarize(summary),
+    createdAt: new Date(event.time).toISOString(),
+    ...(message === undefined ? {} : { message }),
+    ...(content === undefined ? {} : { content }),
+    ...(model === undefined ? {} : { model }),
+    ...(usage === undefined ? {} : { usage }),
+    ...(error === undefined ? {} : { error }),
+    metadata,
+  }
+}
+
+function textOf(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map(item => typeof item === 'object' && item !== null && 'text' in item ? String((item as { text?: unknown }).text ?? '') : '').join('')
+  return String(value ?? '')
+}
+
+function partsOf(value: unknown): ContentPart[] {
+  if (!Array.isArray(value)) return [{ type: 'text', text: textOf(value) }]
+  const parts: ContentPart[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || !('type' in item)) continue
+    const block = item as Record<string, unknown>
+    if (block.type === 'text' && typeof block.text === 'string') parts.push({ type: 'text', text: block.text })
+    else if (block.type === 'reasoning' && typeof block.text === 'string') parts.push({ type: 'reasoning', text: block.text })
+    else if (block.type === 'image') {
+      const attachment = typeof block.attachment === 'object' && block.attachment !== null
+        ? block.attachment as Record<string, unknown> : block
+      parts.push({
+        type: 'image',
+        ...(typeof attachment.attachmentId === 'string' ? { attachmentId: attachment.attachmentId } : {}),
+        ...(typeof attachment.mediaType === 'string' ? { mediaType: attachment.mediaType } : {}),
+      })
+    }
+    else if (block.type === 'tool-call' && typeof block.id === 'string' && typeof block.name === 'string' && typeof block.arguments === 'string') parts.push({ type: 'tool_call', id: block.id, name: block.name, arguments: parseJson(block.arguments) })
+    else if (block.type === 'tool-result' && typeof block.toolCallId === 'string') parts.push({ type: 'tool_result', toolCallId: block.toolCallId, content: textOf(block.content), ...(typeof block.isError === 'boolean' ? { isError: block.isError } : {}) })
+  }
+  return parts
+}
+
+function parseJson(raw: string): JsonValue {
+  try { return JSON.parse(raw) as JsonValue } catch { return raw }
+}
+
+function summarize(value: string): string {
+  const flat = value.replace(/\s+/gu, ' ').trim()
+  return flat.length <= 300 ? flat : `${flat.slice(0, 297)}...`
+}

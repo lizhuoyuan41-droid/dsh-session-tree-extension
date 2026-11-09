@@ -1,0 +1,1169 @@
+/**
+ * Host-half behavior tests: append-only history, cursor jumps, standard LLM
+ * message reconstruction, branch preservation, snapshots, multi-tree
+ * coexistence, the standard error envelope, the /tree command family, and the
+ * system-prompt section.
+ */
+
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir, homedir } from 'node:os'
+import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import type { Agent, AgentStatus } from '@deepseek-ai/dsh-agent'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
+import { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-projection'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
+import { Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import SessionTreeService, {
+  appendSessionTreeEvent,
+  applyTreeCursorToSession,
+  defaultSidecarRoot,
+  flushSessionTreeSidecar,
+  getSessionTreeSidecar,
+  inheritedEventCountOf,
+  persistSessionTree,
+  setSessionTreeSidecar,
+  SessionTree,
+  SessionTreeSidecar,
+  syncSessionTreeSafely,
+  sessionPrefixForkSeed,
+  sessionTreeStore,
+  supportsDurableSessionTreeEvents,
+  supportsSelectedMessageSurface,
+  syncSessionTree,
+} from '@robiteame/dsh-pi-agent-session-tree'
+import type { SessionTreeSnapshot, TreeNode } from '@robiteame/dsh-pi-agent-session-tree'
+import { sessionEventsToTreeNodes } from '@robiteame/dsh-pi-agent-session-tree'
+import * as toolSessionTree from '@robiteame/dsh-tool-session-tree'
+
+const testToolSignal = new AbortController().signal
+const testSidecarRoot = mkdtempSync(join(tmpdir(), 'dsh-session-tree-sidecar-'))
+
+beforeEach(() => {
+  rmSync(testSidecarRoot, { recursive: true, force: true })
+  mkdirSync(testSidecarRoot, { recursive: true })
+  setSessionTreeSidecar(new SessionTreeSidecar(testSidecarRoot))
+})
+
+afterAll(() => {
+  rmSync(testSidecarRoot, { recursive: true, force: true })
+})
+const sessionTreeStoreForTest = (id: string) => sessionTreeStore.get(SessionId(id))
+
+/** One registry-compatible live agent whose session id keys its tree. */
+function stubAgent(rawId: string, cwd?: string): Agent {
+  const id = SessionId(rawId)
+  const session = cwd === undefined
+    ? Session.create(id)
+    : Session.create(id, undefined, { version: 4, id, createdAt: 0, cwd, isSeeded: false })
+  return {
+    id: session.id,
+    options: {},
+    session,
+    inbox: { append: () => {}, claim: () => [], dispose: () => {} } as unknown as Agent['inbox'],
+    get status(): AgentStatus { return 'running' },
+    ctx: new Context(),
+    send: () => {},
+    followup: () => {},
+    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
+    inject: () => {},
+    cancel: () => {},
+    runMaintenance: task => task(new AbortController().signal),
+    whenIdle: () => Promise.resolve(),
+  }
+}
+
+/** Mount the plugin under a real Cordis context with its service deps. */
+
+/** 0.2.2 splits tool dispatch into an executor; the harness mounts a minimal one. */
+function installTestExecutor(ctx: Context): void {
+  ctx.tools.setExecutor({
+    describe: tools => ({ schemas: tools, knownNames: tools.map(tool => tool.name) }),
+    execute: async ({ calls, signal, agent }) => {
+      const results = []
+      for (const call of calls) {
+        const definition = ctx.tools.get(call.name)
+        if (definition === undefined) throw new Error(`unknown tool ${call.name}`)
+        const value = await definition.execute(call.arguments, {
+          signal,
+          callId: call.id,
+          agent,
+        } as never)
+        results.push({
+          callId: call.id,
+          result: { isError: false, content: definition.output.render(call.arguments, value), value },
+        })
+      }
+      return { results, additionalContexts: [], concluded: false }
+    },
+  })
+}
+
+async function harness() {
+  const ctx = new Context()
+  await ctx.plugin(SystemPrompt)
+  // 0.2.2: AgentRegistry injects sessionProjections.
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(ToolRuntime)
+  await ctx.plugin(CommandRuntime)
+  installTestExecutor(ctx)
+  const serviceFiber = await ctx.plugin(SessionTreeService)
+  const fiber = await ctx.plugin(toolSessionTree)
+  return { ctx, fiber, serviceFiber, service: ctx.sessionTree }
+}
+
+/** Execute one registered tool on behalf of an agent and parse its JSON text. */
+async function runTool(ctx: Context, agent: Agent, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  // 0.2.2 dispatches a whole batch to the mounted executor.
+  const batch = await ctx.tools.execute({
+    signal: testToolSignal,
+    calls: [{ id: ToolCallId(`call-${Math.random()}`), name: 'session_tree', arguments: args }],
+    agent,
+  })
+  const result: ToolExecutionResult = batch.results[0]!.result
+  expect(result.isError).toBe(false)
+  if (result.isError) throw new Error('expected session_tree success')
+  const block = result.content[0]
+  if (block?.type !== 'text') throw new Error('expected text tool result')
+  const parsed = JSON.parse(block.text) as Record<string, unknown>
+  expect(result.value).toEqual(parsed)
+  return parsed
+}
+
+function expectOk(result: unknown): unknown {
+  const record = result as { ok?: unknown; value?: unknown }
+  expect(record.ok).toBe(true)
+  if (record.value === undefined) throw new Error('expected ok result')
+  return record.value
+}
+
+function expectError(result: unknown, code: string): void {
+  const record = result as { ok?: unknown; error?: { code?: unknown } }
+  expect(record.ok).toBe(false)
+  expect(record.error?.code).toBe(code)
+}
+
+/** Live stock surface seqs, flattened for assertions. */
+function normalizeSurfaceNodesForTest(session: { surface: { nodes: readonly unknown[] } }): number[] {
+  const out: number[] = []
+  const walk = (values: readonly unknown[]): void => {
+    for (const value of values) {
+      if (Array.isArray(value)) walk(value)
+      else if (Number.isSafeInteger(value)) out.push(value as number)
+    }
+  }
+  walk(session.surface.nodes)
+  return out
+}
+
+function nodeOf(nodes: readonly TreeNode[], summary: string): TreeNode {
+  const node = nodes.find(candidate => candidate.summary === summary)
+  if (node === undefined) throw new Error(`node with summary '${summary}' not found`)
+  return node
+}
+
+describe('session_tree tool: append-only history', () => {
+  it('resolves Remote agent lookups through the service fiber', async () => {
+    const { serviceFiber } = await harness()
+    expect(SessionTreeService.inject).toEqual(['agents'])
+    expect(() => serviceFiber.ctx.agents).not.toThrow()
+  })
+
+  it('appends nodes as children of the cursor, never modifying old nodes', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-append-only')
+    await runTool(ctx, agent, { operation: 'create' })
+    const first = expectOk(await runTool(ctx, agent, {
+      operation: 'append',
+      message: { role: 'user', content: 'first question' },
+    })) as TreeNode
+    const second = expectOk(await runTool(ctx, agent, {
+      operation: 'append',
+      message: { role: 'assistant', content: 'first answer' },
+    })) as TreeNode
+    expect(second.parentId).toBe(first.nodeId)
+    expect(first.parentId).toBe(null)
+
+    const list = expectOk(await runTool(ctx, agent, { operation: 'list' })) as TreeNode[]
+    const replay = list.find(node => node.nodeId === first.nodeId)
+    expect(replay).toEqual(first)
+  })
+
+  it('forks only the latest user turn and keeps every named branch', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-branches')
+    await runTool(ctx, agent, { operation: 'create' })
+    const root = expectOk(await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'user', content: 'root' },
+    })) as TreeNode
+    await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'assistant', content: 'main path' },
+    })
+    // Fork the latest user turn (root) into a named branch, then append.
+    await runTool(ctx, agent, { operation: 'branch', nodeId: root.nodeId, branch: 'alt' })
+    const altNode = expectOk(await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'user', content: 'alternative path' },
+    })) as TreeNode
+    expect(altNode.parentId).toBe(root.nodeId)
+    expect(altNode.branch).toBe('alt')
+
+    const list = expectOk(await runTool(ctx, agent, { operation: 'list' })) as TreeNode[]
+    expect(list).toHaveLength(3)
+    // The latest user turn is now the alternative prompt; fork that one.
+    await runTool(ctx, agent, { operation: 'branch', nodeId: altNode.nodeId, branch: 'second-alt' })
+    const fork = expectOk(await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'user', content: 'fork path' },
+    })) as TreeNode
+    expect(fork.parentId).toBe(altNode.nodeId)
+
+    // Historical turns are rejected outright.
+    const stale = await runTool(ctx, agent, { operation: 'fork', nodeId: root.nodeId, branch: 'stale' })
+    expectError(stale, 'STALE_FORK_POINT')
+
+    const branches = expectOk(await runTool(ctx, agent, { operation: 'branches' })) as Array<{ name: string; headId: string; nodeIds: string[] }>
+    expect(branches.map(branch => branch.name).sort()).toEqual(['alt', 'main', 'second-alt'])
+    expect(branches.find(branch => branch.name === 'alt')?.headId).toBe(altNode.nodeId)
+    const view = expectOk(await runTool(ctx, agent, { operation: 'tree' })) as { branchHeads: Record<string, string> }
+    expect(view.branchHeads.alt).toBe(altNode.nodeId)
+  })
+
+  it('reconstructs standard LLM messages for the root-to-cursor path only', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-context')
+    await runTool(ctx, agent, { operation: 'create' })
+    const root = expectOk(await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'user', content: 'root question' },
+    })) as TreeNode
+    await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'assistant', content: 'main answer' },
+    })
+    await runTool(ctx, agent, { operation: 'branch', nodeId: root.nodeId, branch: 'alt' })
+    await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'user', content: 'alt question' },
+    })
+
+    const context = expectOk(await runTool(ctx, agent, { operation: 'context' })) as {
+      cursor: string | null
+      messages: Array<{ role: string; content: string }>
+    }
+    expect(context.messages).toEqual([
+      { role: 'user', content: 'root question' },
+      { role: 'user', content: 'alt question' },
+    ])
+    expect(context.cursor).not.toBeNull()
+  })
+
+  it('branches with a summary without touching the abandoned path', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-summary')
+    await runTool(ctx, agent, { operation: 'create' })
+    const root = expectOk(await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'user', content: 'root' },
+    })) as TreeNode
+    await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'assistant', content: 'explored' },
+    })
+    const summary = expectOk(await runTool(ctx, agent, {
+      operation: 'branch.summary', nodeId: root.nodeId, summary: 'abandoned exploration',
+    })) as TreeNode
+    expect(summary.parentId).toBe(root.nodeId)
+    const list = expectOk(await runTool(ctx, agent, { operation: 'list' })) as TreeNode[]
+    expect(list).toHaveLength(3)
+    expect(nodeOf(list, 'explored').message?.content).toBe('explored')
+  })
+
+  it('round-trips JSON snapshots with full restore', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-snapshot')
+    await runTool(ctx, agent, { operation: 'create' })
+    await runTool(ctx, agent, {
+      operation: 'append', message: { role: 'user', content: 'kept question' },
+    })
+    const snapshot = expectOk(await runTool(ctx, agent, { operation: 'snapshot.save' })) as SessionTreeSnapshot
+    expect(snapshot.version).toBe(1)
+    expect(snapshot.nodes).toHaveLength(1)
+
+    const restored = expectOk(await runTool(ctx, agent, {
+      operation: 'snapshot.load', snapshot,
+    })) as { sessionId: string }
+    expect(restored.sessionId).toBe(agent.session.id)
+    const list = expectOk(await runTool(ctx, agent, { operation: 'list' })) as TreeNode[]
+    expect(list).toHaveLength(1)
+    expect(list[0]?.message?.content).toBe('kept question')
+
+    const bad = await runTool(ctx, agent, {
+      operation: 'snapshot.load',
+      snapshot: { version: 99, sessionId: agent.session.id, cursor: null, activeBranch: 'main', nodes: [] },
+    })
+    expectError(bad, 'INVALID_SNAPSHOT')
+  })
+
+  it('keeps multiple trees independent and reports standard errors', async () => {
+    const { ctx } = await harness()
+    const alpha = stubAgent('tree-alpha')
+    const beta = stubAgent('tree-beta')
+    await runTool(ctx, alpha, { operation: 'create' })
+    await runTool(ctx, beta, { operation: 'create' })
+    await runTool(ctx, alpha, {
+      operation: 'append', message: { role: 'user', content: 'alpha only' },
+    })
+    const betaList = expectOk(await runTool(ctx, beta, { operation: 'list' })) as TreeNode[]
+    expect(betaList).toHaveLength(0)
+
+    const sessions = expectOk(await runTool(ctx, alpha, { operation: 'sessions' })) as string[]
+    expect(sessions).toContain(alpha.session.id)
+    expect(sessions).toContain(beta.session.id)
+
+    const missing = await runTool(ctx, beta, { operation: 'jump', nodeId: 'no-such-node' })
+    expectError(missing, 'NODE_NOT_FOUND')
+    const foreignAppend = await runTool(ctx, alpha, { sessionId: beta.session.id, operation: 'append', message: { role: 'user', content: 'forbidden' } })
+    expectError(foreignAppend, 'INVALID_ARGUMENT')
+    const foreignJump = await runTool(ctx, alpha, { sessionId: beta.session.id, operation: 'jump', nodeId: 'no-such-node' })
+    expectError(foreignJump, 'INVALID_ARGUMENT')
+    const foreignBranch = await runTool(ctx, alpha, { sessionId: beta.session.id, operation: 'branch', nodeId: 'no-such-node', branch: 'forbidden' })
+    expectError(foreignBranch, 'INVALID_ARGUMENT')
+    const unknownOp = await runTool(ctx, alpha, { operation: 'nope' })
+    expectError(unknownOp, 'INVALID_ARGUMENT')
+  })
+
+  it('supports Pi-style fork, clone, and session status', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-pi-surfaces')
+    await runTool(ctx, agent, { operation: 'create' })
+    const root = expectOk(await runTool(ctx, agent, { operation: 'append', message: { role: 'user', content: 'root' } })) as TreeNode
+    await runTool(ctx, agent, { operation: 'append', message: { role: 'assistant', content: 'answer' } })
+    const fork = expectOk(await runTool(ctx, agent, { operation: 'fork', nodeId: root.nodeId, branch: 'alt' })) as { cursor: string; branch: string }
+    expect(fork.cursor).toBe(root.nodeId)
+    expect(fork.branch).toBe('alt')
+    const browsed = expectOk(await runTool(ctx, agent, { operation: 'jump', nodeId: root.nodeId })) as { cursor: string }
+    expect(browsed.cursor).toBe(root.nodeId)
+    const view = expectOk(await runTool(ctx, agent, { operation: 'tree' })) as { branchHeads: Record<string, string> }
+    expect(view.branchHeads.alt).toBe(root.nodeId)
+    const cloned = expectOk(await runTool(ctx, agent, { operation: 'clone', targetSessionId: 'tree-pi-clone' })) as { sessionId: string }
+    expect(cloned.sessionId).toBe('tree-pi-clone')
+    const status = expectOk(await runTool(ctx, agent, { operation: 'session' })) as { nodeCount: number; currentPathLength: number }
+    expect(status.nodeCount).toBe(2)
+    expect(status.currentPathLength).toBe(1)
+    const cloneTree = sessionTreeStoreForTest('tree-pi-clone')
+    // The clone inherits the whole source tree (root + abandoned answer) even
+    // though the cursor is parked at root; it must not be a leaf-only envelope.
+    expect(cloneTree?.list()).toHaveLength(2)
+    expect(nodeOf(cloneTree?.list() ?? [], 'answer').message?.content).toBe('answer')
+    expect(cloneTree?.cursor).toBe(root.nodeId)
+  })
+
+  it('marks harness-injected user messages while keeping typed prompts unmarked', () => {
+    const nodes = sessionEventsToTreeNodes([
+      { type: 'user/message', seq: 0, time: 1, data: { id: 'm0', role: 'user', content: [{ type: 'text', text: 'typed one' }], source: { kind: 'user' } }, surfaceOp: 'append' },
+      { type: 'user/message', seq: 1, time: 2, data: { id: 'm1', role: 'user', content: [{ type: 'text', text: 'runtime snapshot' }], source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'snapshot' } }, surfaceOp: 'append' },
+      { type: 'user/message', seq: 2, time: 3, data: { id: 'm2', role: 'user', content: [{ type: 'text', text: '<system-reminder>catalog</system-reminder>' }], source: { kind: 'skill-catalog', form: 'catalog' } }, surfaceOp: 'append' },
+      { type: 'user/message', seq: 3, time: 4, data: { role: 'user', content: 'legacy string source', source: 'human' } },
+      { type: 'user/message', seq: 4, time: 5, data: { role: 'user', content: 'legacy missing source' } },
+    ] as never[])
+    // Injected events stay in the append-only projection (jump/fork re-select
+    // the model-visible surface from the tree path); only the marker differs.
+    expect(nodes).toHaveLength(5)
+    expect(nodes.map(node => node.metadata?.injected === true)).toEqual([false, true, true, false, false])
+  })
+
+  it('projects Harness message and tool events into a parent-linked tree', () => {
+    const nodes = sessionEventsToTreeNodes([
+      { type: 'user/message', seq: 0, time: 1000, data: { role: 'user', content: 'hello', source: 'human' } },
+      { type: 'assistant/message', seq: 1, time: 2000, data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'world' }] } } },
+      { type: 'tool/call', seq: 2, time: 3000, data: { turn: 1, step: 1, callId: 'call-1', name: 'bash', arguments: '{}' } },
+      { type: 'request/context', seq: 3, time: 4000, data: { provider: 'deepseek', model: 'deepseek-chat' } },
+    ] as never[])
+    expect(nodes).toHaveLength(4)
+    expect(nodes.map(node => node.parentId)).toEqual([null, nodes[0]?.nodeId, nodes[1]?.nodeId, nodes[2]?.nodeId])
+    expect(nodes[1]?.message?.content).toBe('world')
+    expect(nodes[1]?.content).toEqual([{ type: 'text', text: 'world' }])
+    expect(nodes[2]?.type).toBe('tool_call')
+    expect(nodes[3]?.type).toBe('model_change')
+    expect(nodes[3]?.model).toBe('deepseek-chat')
+  })
+
+  it('folds a tool call and its result into one tree entry', () => {
+    const nodes = sessionEventsToTreeNodes([
+      { type: 'assistant/message', seq: 0, time: 1000, data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'checking' }] } }, surfaceOp: 'append' },
+      { type: 'tool/call', seq: 1, time: 2000, data: { turn: 1, step: 1, callId: 'call-1', name: 'bash', arguments: '{"cmd":"ls"}' } },
+      { type: 'tool/result', seq: 2, time: 3000, data: { turn: 1, step: 1, message: { role: 'user', content: [{ type: 'tool-result', toolCallId: 'call-1', content: [{ type: 'text', text: 'a b c' }] }] } }, surfaceOp: 'append' },
+    ] as never[])
+    expect(nodes).toHaveLength(2)
+    const merged = nodes[1]
+    expect(merged?.type).toBe('tool_call')
+    expect(merged?.message).toMatchObject({ role: 'tool', content: 'a b c', toolCallId: 'call-1' })
+    expect(merged?.content).toEqual([
+      { type: 'tool_call', id: 'call-1', name: 'bash', arguments: { cmd: 'ls' } },
+      { type: 'tool_result', toolCallId: 'call-1', content: 'a b c' },
+    ])
+    expect(merged?.metadata).toMatchObject({ toolResultEventSeq: 2 })
+    expect(merged?.summary).toContain('→ a b c')
+  })
+
+  it('marks a failed tool call on the merged entry', () => {
+    const nodes = sessionEventsToTreeNodes([
+      { type: 'tool/call', seq: 0, time: 1000, data: { turn: 1, step: 1, callId: 'call-e', name: 'pwsh', arguments: '{}' } },
+      { type: 'tool/result', seq: 1, time: 2000, data: { turn: 1, step: 1, message: { role: 'user', content: [{ type: 'tool-result', toolCallId: 'call-e', content: [{ type: 'text', text: 'denied' }], isError: true }] }, error: { name: 'Sandbox', code: 'EPERM' } }, surfaceOp: 'append' },
+    ] as never[])
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]?.error).toBe('Sandbox: EPERM')
+    expect(nodes[0]?.content?.some(part => part.type === 'tool_result' && part.isError === true)).toBe(true)
+  })
+
+  it('counts only typed prompts as forkable user nodes', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-fork-count')
+    agent.session.append('user/message', { id: 'm0', role: 'user', content: [{ type: 'text', text: 'typed one' }], source: { kind: 'user' } } as never, { surfaceOp: 'append' })
+    agent.session.append('user/message', { id: 'm1', role: 'user', content: [{ type: 'text', text: 'skill catalog' }], source: { kind: 'skill-catalog' } } as never, { surfaceOp: 'append' })
+    agent.session.append('user/message', { id: 'm2', role: 'user', content: [{ type: 'text', text: 'typed two' }], source: { kind: 'user' } } as never, { surfaceOp: 'append' })
+    const executed = await ctx.commands.execute(agent, '/fork', [], new AbortController().signal)
+    expect(executed?.result.kind).toBe('success')
+    expect(JSON.parse(executed?.result.text ?? '{}')).toMatchObject({
+      ok: true,
+      value: { selectorRequired: true, userNodeCount: 2 },
+    })
+  })
+
+  it('names the previous typed prompt when forking, skipping injected context', async () => {
+    const { ctx, service } = await harness()
+    ctx.agents.setFactory({
+      createAgent: async (_ownerCtx, options) => ({ agent: stubAgent(String(options.sessionId)), dispose: () => Promise.resolve() }),
+      resume: async () => { throw new Error('resume is unused in this test') },
+    })
+    const agent = stubAgent('tree-fork-previous')
+    agent.session.append('user/message', { id: 'm0', role: 'user', content: [{ type: 'text', text: '<system-reminder>skill catalog</system-reminder>' }], source: { kind: 'skill-catalog' } } as never, { surfaceOp: 'append' })
+    agent.session.append('user/message', { id: 'm1', role: 'user', content: [{ type: 'text', text: 'first typed' }], source: { kind: 'user' } } as never, { surfaceOp: 'append' })
+    agent.session.append('assistant/message', { turn: 1, step: 1, message: { id: 'm2', role: 'assistant', content: [{ type: 'text', text: 'answer' }], source: { kind: 'model', provider: 'p', model: 'm' } } } as never, { surfaceOp: 'append' })
+    agent.session.append('user/message', { id: 'm3', role: 'user', content: [{ type: 'text', text: 'second typed' }], source: { kind: 'user' } } as never, { surfaceOp: 'append' })
+
+    const view = service.list(agent)
+    const injected = view.nodes.find(node => node.summary.includes('skill catalog'))
+    expect(injected?.metadata?.injected).toBe(true)
+    const target = view.nodes.find(node => node.summary === 'second typed')
+    expect(target).toBeDefined()
+
+    const result = await service.forkSession(agent, target!.nodeId, 'fork-branch')
+    expect(result.prompt).toBe('second typed')
+    expect(result.previousUserPrompt).toBe('first typed')
+  })
+
+  it('projects the complete inherited fork seed just like a cold rebuild', async () => {
+    const { ctx, service } = await harness()
+    let seed: readonly SessionEvent[] = []
+    ctx.agents.setFactory({
+      createAgent: async (_ownerCtx, options) => {
+        seed = options.seed ?? []
+        return { agent: stubAgent(String(options.sessionId)), dispose: () => Promise.resolve() }
+      },
+      resume: async () => { throw new Error('unused') },
+    })
+    const agent = stubAgent('tree-fork-full-seed')
+    agent.session.append('turn/start', { turn: 1 })
+    agent.session.append('user/message', { role: 'user', content: 'prompt', source: { kind: 'user' } } as never, { surfaceOp: 'append' })
+    agent.session.append('assistant/message', { turn: 1, step: 1, stream: [], message: { role: 'assistant', content: [{ type: 'text', text: 'inherited answer' }] } } as never, { surfaceOp: 'append' })
+    agent.session.append('turn/end', { turn: 1 })
+    const prompt = service.list(agent).nodes.find(node => node.summary === 'prompt')!
+    const fork = await service.forkSession(agent, prompt.nodeId, 'fork-test')
+    const warm = sessionTreeStore.get(fork.sessionId!)!
+    const cold = sessionEventsToTreeNodes(seed)
+    expect(warm.list()).toEqual(cold)
+    expect(warm.lastSessionEventSeq()).toBe(seed.at(-1)!.seq)
+    expect(warm.selectedNode).toBe(prompt.nodeId)
+    expect(warm.cursor).toBe(cold.at(-1)!.nodeId)
+  })
+
+  it('repairs a path-only fork cache while retaining the selected prompt', async () => {
+    const { service } = await harness()
+    const agent = stubAgent('tree-legacy-incomplete-fork')
+    const id = agent.session.id
+    ;(agent as { session: Session }).session = Session.create(id, undefined, {
+      version: 4, id, createdAt: 0, cwd: '/tmp', isSeeded: false, parentSession: SessionId('source'),
+    })
+    agent.session.append('user/message', { role: 'user', content: 'prompt' } as never, { surfaceOp: 'append' })
+    agent.session.append('assistant/message', { turn: 1, step: 1, stream: [], message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] } } as never, { surfaceOp: 'append' })
+    const nodes = sessionEventsToTreeNodes(agent.session.snapshotEvents())
+    const stale = new SessionTree(id)
+    expectOk(stale.replay([{ seq: 0, node: nodes[0]! }]))
+    expectOk(stale.select(nodes[0]!.nodeId))
+    stale.markSessionEventSeq(agent.session.snapshotEvents().at(-1)!.seq)
+    getSessionTreeSidecar().save(id, stale)
+    const repaired = service.list(agent)
+    expect(repaired.nodes).toEqual(nodes)
+    expect(repaired.selectedNodeId).toBe(nodes[0]!.nodeId)
+    expect(repaired.cursor).toBe(nodes.at(-1)!.nodeId)
+  })
+
+  it('ignores version-1 sidecar caches so unmarked injected nodes re-project', () => {
+    const sessionId = SessionId('tree-sidecar-v1')
+    const path = join(testSidecarRoot, `${sessionId.replaceAll(/[^A-Za-z0-9._-]/g, '_')}.json`)
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      sessionId,
+      savedAt: 1,
+      snapshot: { version: 1, sessionId, cursor: null, activeBranch: 'main', nodes: [] },
+    }))
+    expect(getSessionTreeSidecar().load(sessionId)).toBeUndefined()
+  })
+
+  it('keeps a standalone result only when no matching call was projected', () => {
+    const nodes = sessionEventsToTreeNodes([
+      { type: 'tool/result', seq: 0, time: 1000, data: { turn: 1, step: 1, message: { role: 'user', content: [{ type: 'tool-result', toolCallId: 'orphan', content: [{ type: 'text', text: 'late result' }] }] } }, surfaceOp: 'append' },
+    ] as never[])
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]?.type).toBe('tool_result')
+    expect(nodes[0]?.message?.content).toBe('late result')
+  })
+
+  it('preserves compaction replacements as append-only tree nodes', () => {
+    const nodes = sessionEventsToTreeNodes([
+      { type: 'user/message', seq: 4, time: 1000, data: { role: 'user', content: 'old' }, surfaceOp: 'append' },
+      { type: 'assistant/message', seq: 9, time: 2000, data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'summary' }] } }, surfaceOp: { op: 'replace', start: 4, end: 4 }, sourceEventSeqs: [4] },
+    ] as never[])
+    expect(nodes).toHaveLength(2)
+    expect(nodes[0]?.type).toBe('message')
+    expect(nodes[1]?.type).toBe('compaction')
+    expect(nodes[1]?.parentId).toBe(nodes[0]?.nodeId)
+    expect(nodes[1]?.metadata).toMatchObject({ surfaceReplacement: true, replaceStart: 4, replaceEnd: 4, sourceEventSeqs: [4] })
+  })
+
+  it('exports and replays append-only log records', async () => {
+    const tree = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-log'))
+    const first = tree.append({ role: 'user', content: 'one' })
+    expect(first.ok).toBe(true)
+    const records = tree.log()
+    expect(records).toHaveLength(1)
+    const restored = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-log-restored'))
+    const result = restored.replay(records)
+    expect(result).toEqual({ ok: true, value: { applied: 1 } })
+    expect(restored.list()[0]?.message?.content).toBe('one')
+    const invalid = restored.replay([
+      { seq: 1, node: { ...records[0]!.node, nodeId: 'valid-second', parentId: records[0]!.node.nodeId } },
+      { seq: 3, node: { ...records[0]!.node, nodeId: 'bad-third', parentId: 'valid-second' } },
+    ])
+    expect(invalid.ok).toBe(false)
+    expect(restored.list()).toHaveLength(1)
+  })
+
+  it('replays a branched append-only node log without deleting either path', async () => {
+    const tree = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-mixed-log'))
+    const root = expectOk(tree.append({ role: 'user', content: 'root' })) as TreeNode
+    const main = expectOk(tree.append({ role: 'assistant', content: 'main answer' })) as TreeNode
+    expect(tree.jump(root.nodeId).ok).toBe(true)
+    const alternative = expectOk(tree.append({ role: 'assistant', content: 'alternative answer' })) as TreeNode
+    const records = tree.log()
+    const restored = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-mixed-restored'))
+    expect(restored.replay(records)).toEqual({ ok: true, value: { applied: 3 } })
+    expect(restored.list().map(node => node.nodeId)).toEqual([root.nodeId, main.nodeId, alternative.nodeId])
+    expect(restored.list().find(node => node.nodeId === main.nodeId)?.parentId).toBe(root.nodeId)
+    expect(restored.list().find(node => node.nodeId === alternative.nodeId)?.parentId).toBe(root.nodeId)
+  })
+
+  it('preserves structured content and model usage metadata', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-content-parts')
+    await runTool(ctx, agent, { operation: 'create' })
+    const node = expectOk(await runTool(ctx, agent, {
+      operation: 'append',
+      message: { role: 'assistant', content: 'answer' },
+      content: [{ type: 'text', text: 'answer' }, { type: 'reasoning', text: 'because' }],
+      model: 'deepseek-chat',
+      usage: { inputTokens: 4, outputTokens: 2 },
+      cost: 0.001,
+    })) as TreeNode
+    expect(node.content).toEqual([{ type: 'text', text: 'answer' }, { type: 'reasoning', text: 'because' }])
+    expect(node.model).toBe('deepseek-chat')
+    expect(node.usage).toEqual({ inputTokens: 4, outputTokens: 2 })
+    expect(node.cost).toBe(0.001)
+    const status = expectOk(await runTool(ctx, agent, { operation: 'session' })) as { messageCount: number; tokenCount: number; cost: number }
+    expect(status.messageCount).toBe(1)
+    expect(status.tokenCount).toBe(6)
+    expect(status.cost).toBe(0.001)
+  })
+
+  it('preserves the native event watermark in snapshots and accepts legacy snapshots', async () => {
+    const tree = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-watermark'))
+    tree.markSessionEventSeq(17)
+    const snapshot = tree.snapshot()
+    expect(snapshot.nativeEventSeq).toBe(17)
+    const restored = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-watermark'), snapshot)
+    expect(restored.lastSessionEventSeq()).toBe(17)
+    const legacy = { ...snapshot, nativeEventSeq: undefined }
+    const legacyRestored = new (await import('@robiteame/dsh-pi-agent-session-tree')).SessionTree(SessionId('tree-legacy'), { ...legacy, sessionId: 'tree-legacy' })
+    expect(legacyRestored.lastSessionEventSeq()).toBe(-1)
+  })
+
+  it('forwards tool-call message fields and metadata through append', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-tool-fields')
+    await runTool(ctx, agent, { operation: 'create' })
+    const node = expectOk(await runTool(ctx, agent, {
+      operation: 'append',
+      message: { role: 'tool', content: 'tool result', name: 'session_tree', toolCallId: 'call-1' },
+      metadata: { kind: 'trace', depth: 1 },
+    })) as TreeNode
+    expect(node.message?.name).toBe('session_tree')
+    expect(node.message?.toolCallId).toBe('call-1')
+    expect(node.metadata).toEqual({ kind: 'trace', depth: 1 })
+  })
+
+  it('rejects snapshots for a foreign session and with broken parent topology', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-snapshot-guards')
+    await runTool(ctx, agent, { operation: 'create' })
+
+    const foreign = await runTool(ctx, agent, {
+      operation: 'snapshot.load',
+      snapshot: { version: 1, sessionId: 'other-session', cursor: null, activeBranch: 'main', nodes: [] },
+    })
+    expectError(foreign, 'INVALID_SNAPSHOT')
+
+    const dangling = await runTool(ctx, agent, {
+      operation: 'snapshot.load',
+      snapshot: {
+        version: 1,
+        sessionId: agent.session.id,
+        cursor: 'n1',
+        activeBranch: 'main',
+        nodes: [{ nodeId: 'n1', parentId: 'missing', branch: 'main', summary: 'orphan', createdAt: '2026-01-01T00:00:00.000Z' }],
+      },
+    })
+    expectError(dangling, 'INVALID_SNAPSHOT')
+
+    const cyclic = await runTool(ctx, agent, {
+      operation: 'snapshot.load',
+      snapshot: {
+        version: 1,
+        sessionId: agent.session.id,
+        cursor: 'n1',
+        activeBranch: 'main',
+        nodes: [{ nodeId: 'n1', parentId: 'n1', branch: 'main', summary: 'loop', createdAt: '2026-01-01T00:00:00.000Z' }],
+      },
+    })
+    expectError(cyclic, 'INVALID_SNAPSHOT')
+
+    const inconsistentBranch = await runTool(ctx, agent, {
+      operation: 'snapshot.load',
+      snapshot: { version: 1, sessionId: agent.session.id, cursor: 'n1', activeBranch: 'missing', branchHeads: { main: 'n1' }, nodes: [{ nodeId: 'n1', parentId: null, branch: 'main', summary: 'node', createdAt: '2026-01-01T00:00:00.000Z' }] },
+    })
+    expectError(inconsistentBranch, 'INVALID_SNAPSHOT')
+
+    const malformedParts = await runTool(ctx, agent, {
+      operation: 'snapshot.load',
+      snapshot: {
+        version: 1,
+        sessionId: agent.session.id,
+        cursor: 'n1',
+        activeBranch: 'main',
+        nodes: [{ nodeId: 'n1', parentId: null, branch: 'main', summary: 'bad', createdAt: '2026-01-01T00:00:00.000Z', content: [{ type: 'unknown' }] }],
+      },
+    })
+    expectError(malformedParts, 'INVALID_SNAPSHOT')
+  })
+})
+
+describe('session_tree plugin surfaces', () => {
+  it('keeps the live store unchanged when incremental synchronization fails', async () => {
+    const { service } = await harness()
+    const agent = stubAgent('tree-atomic-sync')
+    agent.session.append('user/message', { role: 'user', content: 'valid' } as never, { surfaceOp: 'append' })
+    const before = service.list(agent)
+    agent.session.append('session-tree/cursor', { nodeId: 'missing' })
+    expect(() => syncSessionTree(agent)).toThrow('NODE_NOT_FOUND')
+    expect(service.list(agent).nodes.map(node => node.nodeId)).toEqual(before.nodes.map(node => node.nodeId))
+  })
+
+  it('rebuilds native image history completely and then appends incrementally', async () => {
+    const { service } = await harness()
+    const agent = stubAgent('cold-image-history')
+    agent.session.append('user/message', { role: 'user', content: [{ type: 'text', text: 'before image' }] } as never, { surfaceOp: 'append' })
+    agent.session.append('turn/start', { turn: 1 })
+    agent.session.append('user/message', { role: 'user', content: [{ type: 'image', attachment: { attachmentId: 'native-image' } }] } as never, { surfaceOp: 'append' })
+    const before = service.list(agent)
+    expect(before.nodes).toHaveLength(2)
+    expect(before.nodes[1]?.parentId).toBe(before.nodes[0]?.nodeId)
+    expect(before.nodes[1]?.content).toEqual([{ type: 'image', attachmentId: 'native-image' }])
+    agent.session.append('user/message', { role: 'user', content: 'after image' } as never, { surfaceOp: 'append' })
+    const after = service.list(agent)
+    expect(after.nodes).toHaveLength(3)
+    expect(after.nodes[2]?.parentId).toBe(before.nodes[1]?.nodeId)
+  })
+
+  it('hydrates the tree from native Harness session events on first Remote read', async () => {
+    const { ctx, service } = await harness()
+    const agent = stubAgent('tree-native-hydrate')
+    agent.session.append('user/message', { role: 'user', content: 'native history' } as never, { surfaceOp: 'append' })
+    agent.session.append('turn/start', { turn: 1 })
+    agent.session.append('tool/call', { turn: 1, step: 1, callId: 'call-1', name: 'bash', arguments: '{}' } as never)
+    const view = service.list(agent)
+    expect(view.nodes).toHaveLength(2)
+    expect(view.nodes[0]?.message?.content).toBe('native history')
+    expect(view.nodes[1]?.type).toBe('tool_call')
+    expect(service.jump(agent, view.nodes[0]!.nodeId).messages).toEqual([{ role: 'user', content: 'native history' }])
+    agent.session.append('session-tree/branch', { nodeId: view.nodes[0]!.nodeId, branch: 'alternate' })
+    agent.session.append('user/message', { role: 'user', content: 'later event' } as never, { surfaceOp: 'append' })
+    const updated = service.list(agent)
+    expect(updated.nodes).toHaveLength(3)
+    expect(updated.nodes[1]?.parentId).toBe(updated.nodes[0]?.nodeId)
+    expect(updated.nodes[1]?.type).toBe('tool_call')
+    expect(updated.nodes[2]?.parentId).toBe(updated.nodes[0]?.nodeId)
+    expect(updated.nodes[2]?.branch).toBe('alternate')
+    const snapshot = service.list(agent)
+    const custom = expectOk(await runTool(ctx, agent, { operation: 'append', message: { role: 'assistant', content: 'custom entry' } })) as { nodeId: string }
+    expect(custom.nodeId).toBeDefined()
+    const afterResync = service.list(agent)
+    expect(afterResync.nodes.some(node => node.nodeId === custom.nodeId)).toBe(true)
+    expect(afterResync.nodes.filter(node => node.message !== undefined)).toHaveLength(3)
+    const mixedStatus = expectOk(await runTool(ctx, agent, { operation: 'session' })) as { messageCount: number }
+    expect(mixedStatus.messageCount).toBe(3)
+    agent.session.append('session-tree/snapshot', { snapshot: { version: 1, sessionId: agent.session.id, cursor: snapshot.cursor, activeBranch: snapshot.activeBranch, ...(snapshot.branchHeads !== undefined ? { branchHeads: snapshot.branchHeads } : {}), nodes: snapshot.nodes } })
+    agent.session.append('session-tree/node', { node: { nodeId: 'after-snapshot', parentId: snapshot.cursor, branch: snapshot.activeBranch, summary: 'after snapshot', createdAt: '2026-01-01T00:00:00.000Z', message: { role: 'user', content: 'after snapshot' } } })
+    const restored = service.list(agent)
+    expect(restored.nodes.some(node => node.nodeId === 'after-snapshot')).toBe(true)
+  })
+
+  it('records the branch cursor without rewriting the canonical history on stock Harness', async () => {
+    const { service } = await harness()
+    const agent = stubAgent('tree-model-surface')
+    agent.session.append('user/message', { role: 'user', content: 'root', source: 'human' } as never, { surfaceOp: 'append' })
+    agent.session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      stream: [],
+      message: { role: 'assistant', content: [{ type: 'text', text: 'main answer' }] },
+    } as never, { surfaceOp: 'append' })
+
+    const initial = service.list(agent)
+    expect(agent.session.deriveMessages()).toHaveLength(2)
+    service.jump(agent, initial.nodes[0]!.nodeId)
+    // Projection-only: the cursor moves in the tree, the canonical surface stays.
+    expect(agent.session.deriveMessages().map(message => message.role)).toEqual(['user', 'assistant'])
+
+    agent.session.append('user/message', { role: 'user', content: 'alternate prompt', source: 'human' } as never, { surfaceOp: 'append' })
+    expect(agent.session.deriveMessages().map(message => message.role)).toEqual(['user', 'assistant', 'user'])
+    const branched = service.list(agent)
+    const alternative = branched.nodes.find(node => node.summary === 'alternate prompt')
+    expect(alternative?.parentId).toBe(initial.nodes[0]!.nodeId)
+    expect(branched.nodes.find(node => node.summary === 'main answer')).toBeDefined()
+  })
+
+  it('runs /fork and /tree clone from the explicitly selected node without IDs', async () => {
+    const { ctx, service } = await harness()
+    const agent = stubAgent('tree-command-selection')
+    agent.session.append('user/message', { role: 'user', content: 'root', source: 'human' } as never, { surfaceOp: 'append' })
+    agent.session.append('assistant/message', { turn: 1, step: 1, stream: [], message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] } } as never, { surfaceOp: 'append' })
+    const before = await ctx.commands.execute(agent, '/fork', [], new AbortController().signal)
+    expect(before?.result.kind).toBe('success')
+    expect(JSON.parse(before?.result.text ?? '{}')).toMatchObject({
+      ok: true,
+      value: { selectorRequired: true, userNodeCount: 1 },
+    })
+
+    const selected = service.list(agent).nodes[0]!
+    service.jump(agent, selected.nodeId)
+    const cloned = await ctx.commands.execute(agent, '/tree clone', [], new AbortController().signal)
+    expect(cloned?.result.kind).toBe('success')
+    const payload = JSON.parse(cloned?.result.text ?? '{}') as { value?: { sessionId?: string } }
+    expect(payload.value?.sessionId).toMatch(/^tree-command-selection-clone-/u)
+    const cloneTree = sessionTreeStoreForTest(payload.value?.sessionId ?? '')
+    // A clone inherits the ENTIRE source conversation, not just the selected
+    // leaf's envelope: both the root and the abandoned answer must survive.
+    expect(cloneTree?.list()).toHaveLength(2)
+    expect(nodeOf(cloneTree?.list() ?? [], 'answer').message?.content).toBe('answer')
+    expect(cloneTree?.cursor).toBe(selected.nodeId)
+    expect(cloneTree?.selectedNode).toBe(selected.nodeId)
+  })
+
+  it('grows the /fork branch as a child of the selected node, not the previous tail', async () => {
+    const { service } = await harness()
+    const agent = stubAgent('tree-fork-parent')
+    agent.session.append('user/message', { role: 'user', content: 'root', source: 'human' } as never, { surfaceOp: 'append' })
+    agent.session.append('assistant/message', { turn: 1, step: 1, stream: [], message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] } } as never, { surfaceOp: 'append' })
+
+    const selected = service.list(agent).nodes[0]!
+    service.jump(agent, selected.nodeId)
+    // This spec covers the compatibility branch primitive, not the new
+    // user-facing independent-session /fork workflow.
+    const forked = service.branchInPlace(agent, selected.nodeId, 'experiment')
+    expect(forked).toMatchObject({ cursor: selected.nodeId, branch: 'experiment' })
+
+    agent.session.append('user/message', { role: 'user', content: 'branch prompt', source: 'human' } as never, { surfaceOp: 'append' })
+    const branched = service.list(agent)
+    const branchNode = branched.nodes.find(node => node.summary === 'branch prompt')
+    expect(branchNode?.parentId).toBe(selected.nodeId)
+    expect(branchNode?.branch).toBe('experiment')
+  })
+
+  it('clones the full source event log so the new session derives the same messages', async () => {
+    const { ctx, service } = await harness()
+    const created: Array<{ sessionId: string; seed: readonly SessionEvent[]; meta?: Record<string, unknown> }> = []
+    ctx.agents.setFactory({
+      createAgent: async (_ownerCtx, options) => {
+        created.push({ sessionId: String(options.sessionId), seed: options.seed ?? [], ...(options.meta === undefined ? {} : { meta: { ...options.meta } }) })
+        return { agent: stubAgent(String(options.sessionId)), dispose: () => Promise.resolve() }
+      },
+      resume: async () => { throw new Error('resume is unused in this test') },
+    })
+    const agent = stubAgent('tree-clone-content', '/workspace/clone-pi')
+    agent.session.append('user/message', { id: 'm-root', role: 'user', content: [{ type: 'text', text: 'root' }], source: { kind: 'user' } } as never, { surfaceOp: 'append' })
+    agent.session.append('assistant/message', { turn: 1, step: 1, stream: [], message: { id: 'm-answer', role: 'assistant', content: [{ type: 'text', text: 'answer' }], source: { kind: 'model', provider: 'p', model: 'm' } } } as never, { surfaceOp: 'append' })
+
+    const selected = service.list(agent).nodes[0]!
+    service.jump(agent, selected.nodeId)
+    const cloned = await ctx.commands.execute(agent, '/tree clone', [], new AbortController().signal)
+    expect(cloned?.result.kind).toBe('success')
+    expect(created).toHaveLength(1)
+    expect(created[0]?.meta).toMatchObject({ cwd: '/workspace/clone-pi' })
+
+    const replayed = Session.create(SessionId('tree-clone-replay'), created[0]!.seed)
+    const texts = replayed.deriveMessages().map(message =>
+      (message.content as Array<{ type?: string; text?: string }>).map(block => block.text ?? '').join(''),
+    )
+    expect(texts).toEqual(['root', 'answer'])
+  })
+
+  it('merges a tool result that arrives after its call was already synced', async () => {
+    const { service } = await harness()
+    const agent = stubAgent('tree-tool-merge')
+    agent.session.append('user/message', { role: 'user', content: 'run it', source: 'human' } as never, { surfaceOp: 'append' })
+    agent.session.append('tool/call', { turn: 1, step: 1, callId: 'call-9', name: 'bash', arguments: '{"cmd":"ls"}' } as never)
+    const before = service.list(agent)
+    expect(before.nodes).toHaveLength(2)
+
+    // The call was already committed by the sync above; its result lands in a
+    // later event batch and must fold into the same entry, not add a new one.
+    agent.session.append('tool/result', {
+      turn: 1,
+      step: 1,
+      message: { role: 'user', content: [{ type: 'tool-result', toolCallId: 'call-9', content: [{ type: 'text', text: 'ok output' }] }] },
+    } as never, { surfaceOp: 'append', sourceEventSeqs: [SessionSeq(1)] })
+    const after = service.list(agent)
+    expect(after.nodes).toHaveLength(2)
+    const merged = after.nodes.find(node => node.type === 'tool_call')
+    expect(merged?.content?.some(part => part.type === 'tool_result' && part.content === 'ok output')).toBe(true)
+    expect(merged?.message?.role).toBe('tool')
+    expect(merged?.metadata).toMatchObject({ toolResultEventSeq: 2 })
+    // The model-visible surface keeps the result event next to its call on both
+    // patched Harness (selected-surface API) and projection-only Harness.
+    if (supportsSelectedMessageSurface(agent.session)) {
+      expect(agent.session.messageSurfaceNodes()).toEqual([0, 2])
+    } else {
+      // On a patched Harness the guard's negative branch is `never`, so read
+      // the stock surface through a structural view instead of the narrowed type.
+      const stock = agent.session as unknown as { surface: { nodes: readonly number[] } }
+      expect(stock.surface.nodes).toEqual([0, 2])
+    }
+  })
+
+  it('folds legacy split tool pairs when restoring a snapshot', async () => {
+    const { ctx } = await harness()
+    const agent = stubAgent('tree-legacy-fold')
+    await runTool(ctx, agent, { operation: 'create' })
+    const restored = await runTool(ctx, agent, {
+      operation: 'snapshot.load',
+      snapshot: {
+        version: 1,
+        sessionId: agent.session.id,
+        cursor: 'n3',
+        selectedNodeId: 'n3',
+        activeBranch: 'main',
+        branchHeads: { main: 'n3' },
+        nodes: [
+          { nodeId: 'n1', parentId: null, type: 'message', branch: 'main', summary: 'q', createdAt: '2026-01-01T00:00:00.000Z', message: { role: 'user', content: 'q' } },
+          { nodeId: 'n2', parentId: 'n1', type: 'tool_call', branch: 'main', summary: 'ls()', createdAt: '2026-01-01T00:00:01.000Z', content: [{ type: 'tool_call', id: 'c1', name: 'ls', arguments: {} }] },
+          { nodeId: 'n3', parentId: 'n2', type: 'tool_result', branch: 'main', summary: 'out', createdAt: '2026-01-01T00:00:02.000Z', message: { role: 'tool', content: 'out', toolCallId: 'c1' }, content: [{ type: 'tool_result', toolCallId: 'c1', content: 'out' }] },
+        ],
+      },
+    })
+    expectOk(restored)
+    const list = expectOk(await runTool(ctx, agent, { operation: 'list' })) as TreeNode[]
+    expect(list).toHaveLength(2)
+    expect(list[1]?.type).toBe('tool_call')
+    expect(list[1]?.content?.some(part => part.type === 'tool_result' && part.content === 'out')).toBe(true)
+    // The cursor and branch head move from the removed result node to the merged entry.
+    const tree = sessionTreeStore.get(agent.session.id)
+    expect(tree?.cursor).toBe('n2')
+    expect(tree?.selectedNode).toBe('n2')
+    expect(tree?.branches().find(branch => branch.name === 'main')?.headId).toBe('n2')
+  })
+
+  it('registers the tool, the /tree command, and the system-prompt section', async () => {
+    const { ctx, fiber } = await harness()
+    const agent = stubAgent('tree-surfaces')
+    expect(ctx.tools.get('session_tree')?.name).toBe('session_tree')
+    expect(ctx.commands.find(agent, 'tree')?.name).toBe('tree')
+    expect(ctx.commands.find(agent, 'fork')?.name).toBe('fork')
+    expect(ctx.commands.find(agent, 'clone')?.name).toBe('clone')
+    expect(ctx.commands.find(agent, 'session')?.name).toBe('session')
+    const section = (await ctx.systemPrompt.assemble()).sections.find(item => item.name === 'plugin:pi_agent_session_tree')
+    expect(section?.text).toContain('durable Harness Session log')
+    expect(section?.text).toContain('never duplicate ordinary turns')
+    await fiber.dispose()
+    expect(ctx.tools.get('session_tree')).toBeUndefined()
+  })
+})
+
+describe('sidecar write policy', () => {
+  it('coalesces large-tree writes and flushes them on demand', () => {
+    const tree = new SessionTree(SessionId('large-sidecar'))
+    for (let index = 0; index < 250; index += 1) {
+      expectOk(tree.append({ role: 'user', content: `prompt-${index}` }))
+    }
+    expect(persistSessionTree(tree)).toBe(true)
+    // Above the synchronous threshold the write is deferred off the click path.
+    expect(getSessionTreeSidecar().load(tree.sessionId)).toBeUndefined()
+    flushSessionTreeSidecar()
+    expect(getSessionTreeSidecar().load(tree.sessionId)?.size).toBe(250)
+  })
+})
+
+describe('projection-only Session compatibility (no harness.patch)', () => {
+  it('detects the missing selected-surface API and skips in-place surface switches', () => {
+    const agent = stubAgent('tree-stock-compat')
+    // A stock Session has no selectMessageSurface/messageSurfaceNodes members.
+    const stockLike = {
+      id: SessionId('tree-stock-compat'),
+      events: [] as SessionEvent[],
+      surface: { nodes: [] as number[] },
+    } as unknown as Session
+    ;(agent as { session: Session }).session = stockLike
+    expect(supportsSelectedMessageSurface(agent.session)).toBe(false)
+    expect(supportsDurableSessionTreeEvents(agent.session)).toBe(false)
+    const tree = new SessionTree(agent.session.id)
+    expect(() => applyTreeCursorToSession(agent, tree)).not.toThrow()
+    expect(appendSessionTreeEvent(agent.session, 'session-tree/cursor', { nodeId: null })).toBeUndefined()
+  })
+
+  it('keeps tree store mutations working when durable tree markers cannot be appended', async () => {
+    const { service } = await harness()
+    const agent = stubAgent('tree-stock-mutation')
+    const original = agent.session
+    ;(agent as { session: Session }).session = {
+      id: original.id,
+      events: [...original.snapshotEvents()],
+      surface: { nodes: [] as number[] },
+    } as unknown as Session
+    expect(supportsSelectedMessageSurface(agent.session)).toBe(false)
+    // Reading the projection must not throw even though the surface cannot be
+    // re-pointed at the selected path.
+    const view = service.list(agent)
+    expect(view.nodes).toEqual([])
+    expect(() => service.jump(agent, null)).not.toThrow()
+    expect(service.list(agent).cursor).toBeNull()
+  })
+
+  it('leaves the stock Session log and surface untouched in projection mode', () => {
+    const sessionId = SessionId('tree-stock-rewrite')
+    const events = [
+      { type: 'user/message', seq: 0, time: 1, data: { role: 'user', content: 'one', source: { kind: 'user' } }, surfaceOp: 'append' },
+      { type: 'user/message', seq: 1, time: 2, data: { role: 'user', content: 'two', source: { kind: 'user' } }, surfaceOp: 'append' },
+    ] as unknown as SessionEvent[]
+    const surfaceNodes = [0, 1] as number[]
+    const stockSession = {
+      id: sessionId,
+      events,
+      surface: { nodes: surfaceNodes },
+      requestContext: () => ({ provider: 'mock', model: 'mock' }),
+      append: ((type: string, data: Record<string, unknown>, opts?: { surfaceOp?: unknown; sourceEventSeqs?: number[] }) => {
+        const event = {
+          type,
+          seq: events.length,
+          time: Date.now(),
+          data,
+          ...(opts?.surfaceOp === undefined ? {} : { surfaceOp: opts.surfaceOp }),
+          ...(opts?.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: opts.sourceEventSeqs }),
+        } as SessionEvent
+        events.push(event)
+        return event
+      }) as Session['append'],
+    } as unknown as Session
+
+    const agent = stubAgent(sessionId)
+    ;(agent as { session: Session }).session = stockSession
+    const tree = new SessionTree(sessionId)
+    const root = expectOk(tree.append({ role: 'user', content: 'one' }, { metadata: { sessionEventSeq: 0 } })) as TreeNode
+    const second = expectOk(tree.append({ role: 'user', content: 'two' }, { metadata: { sessionEventSeq: 1 } })) as TreeNode
+    tree.jump(root.nodeId)
+
+    applyTreeCursorToSession(agent, tree)
+
+    // 0.2.2 adaptation: projection-only navigation never writes the Session log.
+    expect(events).toHaveLength(2)
+    expect(events.filter(event => event.type === 'system/message')).toHaveLength(0)
+    expect(surfaceNodes).toEqual([0, 1])
+
+    tree.jump(second.nodeId)
+    applyTreeCursorToSession(agent, tree)
+    expect(events).toHaveLength(2)
+    expect(surfaceNodes).toEqual([0, 1])
+
+    const restored = getSessionTreeSidecar().load(sessionId)
+    expect(restored?.cursor).toBe(second.nodeId)
+    expect(restored?.list().map(node => node.nodeId)).toEqual([root.nodeId, second.nodeId])
+  })
+
+  it('keeps the projection-only Session log replay-identical across repeated navigation', () => {
+    const sessionId = SessionId('tree-stock-replay')
+    const session = Session.create(sessionId)
+    session.append('user/message', { id: 'm-one', role: 'user', content: [{ type: 'text', text: 'one' }], source: { kind: 'user' } } as never, { surfaceOp: 'append' })
+    session.append('user/message', { id: 'm-two', role: 'user', content: [{ type: 'text', text: 'two' }], source: { kind: 'user' } } as never, { surfaceOp: 'append' })
+
+    const agent = stubAgent(sessionId)
+    ;(agent as { session: Session }).session = session
+    const tree = new SessionTree(sessionId)
+    const root = expectOk(tree.append({ role: 'user', content: 'one' }, { metadata: { sessionEventSeq: 0 } })) as TreeNode
+    const second = expectOk(tree.append({ role: 'user', content: 'two' }, { metadata: { sessionEventSeq: 1 } })) as TreeNode
+
+    for (const target of [root.nodeId, second.nodeId, root.nodeId]) {
+      tree.jump(target)
+      applyTreeCursorToSession(agent, tree)
+    }
+
+    // The durable log must still rebuild through a fresh Session: replace
+    // ranges are computed against the replayed surface, not the live spliced
+    // one, so repeated navigation cannot corrupt the stored history.
+    const seed = session.snapshotEvents().slice()
+    expect(() => Session.create(SessionId('tree-stock-replay-check'), seed)).not.toThrow()
+    const replayed = Session.create(SessionId('tree-stock-replay-check'), seed)
+    // Projection-only navigation never appends markers: replay is the linear log.
+    expect(replayed.deriveMessages()).toHaveLength(2)
+    expect(normalizeSurfaceNodesForTest(session)).toEqual([0, 1])
+  })
+
+  it('keeps synthetic cursor events out of the tree projection', () => {
+    const nodes = sessionEventsToTreeNodes([
+      { type: 'user/message', seq: 0, time: 1, data: { role: 'user', content: 'one', source: { kind: 'user' } }, surfaceOp: 'append' },
+      { type: 'system/message', seq: 1, time: 2, data: { turn: 0, step: 0, message: { role: 'system', content: [], id: 'cursor', source: { kind: 'system-prompt' } }, treeRestore: { kind: 'cursor', nodeId: 'n1' } }, surfaceOp: { op: 'replace', startSeq: 0, endSeq: 0 }, sourceEventSeqs: [0] },
+    ] as never[])
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]?.type).toBe('message')
+  })
+})
+
+describe('adapt.80 resilience: sidecar home, fork seeds, watermark recovery, write policy', () => {
+  it('resolves the DSH home, not the bare user home, when DSH_HOME is unset', () => {
+    const saved = process.env.DSH_HOME
+    try {
+      delete process.env.DSH_HOME
+      expect(defaultSidecarRoot()).toBe(join(homedir(), '.dsh', 'storages', 'session-tree'))
+      process.env.DSH_HOME = ''
+      expect(defaultSidecarRoot()).toBe(join(homedir(), '.dsh', 'storages', 'session-tree'))
+      process.env.DSH_HOME = join(tmpdir(), 'dsh-home-explicit')
+      expect(defaultSidecarRoot()).toBe(join(tmpdir(), 'dsh-home-explicit', 'storages', 'session-tree'))
+    } finally {
+      if (saved === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = saved
+    }
+  })
+
+  it('declares the inherited marker index so the host accepts every fork seed', () => {
+    const buildSource = (open: boolean): Session => {
+      const session = Session.create(SessionId(open ? 'seed-open-src' : 'seed-closed-src'))
+      session.append('turn/start', { turn: 1 })
+      session.append('user/message', {
+        id: 'm1', role: 'user', content: [{ type: 'text', text: 'prompt' }], source: { kind: 'user' },
+      } as never, { surfaceOp: 'append' })
+      if (!open) {
+        session.append('assistant/message', {
+          turn: 1,
+          step: 1,
+          stream: [],
+          message: {
+            id: 'a1', role: 'assistant', content: [{ type: 'text', text: 'answer' }], source: { kind: 'model', provider: 'p', model: 'm' },
+          },
+        } as never, { surfaceOp: 'append' })
+        session.append('turn/end', { turn: 1 })
+      }
+      return session
+    }
+    for (const open of [false, true]) {
+      const source = buildSource(open)
+      const path = sessionEventsToTreeNodes(source.snapshotEvents())
+      const targetId = SessionId(open ? 'seed-open-child' : 'seed-closed-child')
+      const seed = sessionPrefixForkSeed(source, path, targetId)
+      const marker = seed.find(event => event.type === 'session/end-seed'
+        && (event.data as { inherited?: unknown }).inherited === true)
+      expect(marker).toBeDefined()
+      const count = inheritedEventCountOf(seed)
+      expect(count).toBe(marker!.seq)
+      const child = Session.create(
+        targetId,
+        seed.map(event => ({ ...event })),
+        { version: 4, id: targetId, createdAt: 0, cwd: '/tmp', isSeeded: true },
+        count,
+      )
+      expect(child.inheritedEventCount).toBe(count)
+      expect(child.snapshotEvents().filter(event => event.type === 'session/end-seed'
+        && (event.data as { inherited?: unknown }).inherited === true)).toHaveLength(1)
+      expect(child.snapshotEvents()).toHaveLength(seed.length)
+    }
+  })
+
+  it('rebuilds when a persisted watermark is ahead of the native event log', async () => {
+    const { service } = await harness()
+    const agent = stubAgent('tree-watermark-ahead')
+    agent.session.append('user/message', { role: 'user', content: 'one' } as never, { surfaceOp: 'append' })
+    const stale = new SessionTree(SessionId('tree-watermark-ahead'))
+    for (let index = 0; index < 3; index += 1) expectOk(stale.append({ role: 'user', content: `stale-${index}` }))
+    stale.markSessionEventSeq(10)
+    getSessionTreeSidecar().save(SessionId('tree-watermark-ahead'), stale)
+
+    const first = service.list(agent)
+    expect(first.nodes).toHaveLength(1)
+    agent.session.append('user/message', { role: 'user', content: 'two' } as never, { surfaceOp: 'append' })
+    expect(() => service.list(agent)).not.toThrow()
+    const second = service.list(agent)
+    expect(second.nodes).toHaveLength(2)
+    expect(second.nodes.map(node => node.summary)).toContain('two')
+  })
+
+  it('does not rewrite an unchanged sidecar on every read', async () => {
+    class CountingSidecar extends SessionTreeSidecar {
+      saves = 0
+      override save(sessionId: SessionId, tree: SessionTree): boolean {
+        this.saves += 1
+        return super.save(sessionId, tree)
+      }
+    }
+    const counting = new CountingSidecar(testSidecarRoot)
+    setSessionTreeSidecar(counting)
+    const { service } = await harness()
+    const agent = stubAgent('tree-no-rewrite')
+    agent.session.append('user/message', { role: 'user', content: 'one' } as never, { surfaceOp: 'append' })
+    service.list(agent)
+    expect(counting.saves).toBeGreaterThan(0)
+    const afterFirstRead = counting.saves
+    service.list(agent)
+    service.list(agent)
+    expect(counting.saves).toBe(afterFirstRead)
+  })
+
+  it('contains projection failures and recovers the projection once', async () => {
+    const { service } = await harness()
+    const agent = stubAgent('tree-safe-sync')
+    agent.session.append('user/message', { role: 'user', content: 'one' } as never, { surfaceOp: 'append' })
+    const broken = new SessionTree(SessionId('tree-safe-sync'))
+    expectOk(broken.replay([{
+      seq: 0,
+      node: {
+        nodeId: 'session-event-0',
+        parentId: null,
+        branch: 'main',
+        summary: 'dangling',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    }]))
+    sessionTreeStore.replace(SessionId('tree-safe-sync'), broken)
+    // The committed tree is corrupt for the log; a safe sync must contain it,
+    // discard the bad projection, and rebuild from the native log.
+    expect(() => syncSessionTreeSafely(agent)).not.toThrow()
+    const recovered = service.list(agent)
+    expect(recovered.nodes.map(node => node.summary)).toEqual(['one'])
+  })
+})

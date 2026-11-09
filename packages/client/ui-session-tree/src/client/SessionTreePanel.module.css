@@ -1,0 +1,577 @@
+/* Right details-sidebar occupant. Geometry mirrors Harness DetailsPanel; the
+   graph gutter is fixed at 44px, so tree depth cannot grow horizontal width. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+
+/* Official Harness fallback: shell.overlay is additive, unlike the shipped
+   single-occupant Tool details surface. The root stays click-through and only
+   the visible drawer accepts pointer input. */
+.overlayRoot[data-session-tree-overlay] {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.promptEditor {
+  position: fixed;
+  z-index: 2;
+  inset: auto 24px 24px;
+  display: grid;
+  gap: 8px;
+  width: min(640px, calc(100vw - 48px));
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 20%);
+  pointer-events: auto;
+}
+
+.promptTitle {
+  color: var(--dsw-alias-label-primary-dimmed);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.promptInput {
+  min-height: 96px;
+  max-height: min(40vh, 320px);
+  padding: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.promptError {
+  margin: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.promptActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.promptActions button {
+  min-height: 30px;
+  padding: 5px 11px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.promptActions button:disabled { cursor: not-allowed; opacity: .55; }
+
+.overlayDrawer {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: min(380px, calc(100vw - 48px));
+  min-width: 0;
+  overflow: hidden;
+  border-inline-start: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: -10px 0 28px rgb(0 0 0 / 18%);
+  pointer-events: auto;
+}
+
+.header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 55px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.heading { min-width: 0; }
+.title {
+  display: block;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stats {
+  display: block;
+  margin-top: 1px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.refresh,
+.forkAction,
+.close {
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-state-business-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.refresh {
+  flex: none;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.refresh:hover,
+.forkAction:hover,
+.close:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 20px;
+  line-height: 20px;
+}
+.refresh:focus-visible,
+.forkAction:focus-visible,
+.close:focus-visible,
+.select:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+.refresh:disabled,
+.forkAction:disabled,
+.focusAction:disabled,
+.select:disabled { cursor: wait; opacity: .6; }
+
+.legend {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+.legendDot {
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--dsw-alias-state-business-primary);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+/* Keep the native rail visible when the tree narrows the conversation below
+   the host's 900px container breakpoint. Its own paging/click logic is retained. */
+body:has([data-session-tree-panel]) nav[aria-label='轮次导航'],
+body:has([data-session-tree-panel]) nav[aria-label='Turn navigation'] {
+  display: block;
+}
+
+.laneEdges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.body {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 6px 8px 12px;
+}
+
+.node {
+  display: grid;
+  grid-template-columns: 18px var(--lane-gutter, 92px) minmax(0, 1fr) 52px;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border-radius: 7px;
+  color: inherit;
+}
+.node:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.nodeSelected {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary) 34%, transparent);
+}
+.nodePath {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 7%, transparent);
+}
+.nodePlaceholder { opacity: .7; }
+
+.expander,
+.expanderPlaceholder {
+  align-self: center;
+  justify-self: start;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.expander {
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.expander svg {
+  width: 10px;
+  height: 10px;
+  transition: transform .16s ease;
+}
+
+.expander[aria-expanded='true'] svg { transform: rotate(90deg); }
+.expander:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.expander:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: -2px; }
+
+/* One full-height lane column: every segment spans the whole row box, so
+   adjacent rows join without gaps regardless of message height. */
+.laneColumn {
+  position: relative;
+  align-self: stretch;
+  width: var(--lane-gutter, 92px);
+  min-height: 38px;
+  overflow: visible;
+}
+.laneRail,
+.laneStem,
+.laneTail {
+  position: absolute;
+  width: 1.5px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+}
+.laneRail { top: 0; bottom: 0; }
+.laneShift {
+  position: absolute;
+  top: 0;
+  height: 1.5px;
+  border-radius: 1px;
+  transform: translateY(-0.75px);
+}
+.laneStem { top: 0; bottom: 50%; transform: translateX(-50%); }
+.laneTail { top: 50%; bottom: 0; transform: translateX(-50%); }
+.laneCurve {
+  position: absolute;
+  left: 0;
+  width: 300px;
+  overflow: visible;
+  pointer-events: none;
+}
+.laneDot,
+.laneDotActive {
+  position: absolute;
+  top: 50%;
+  display: block;
+  overflow: visible;
+  transform: translate(-50%, -50%);
+}
+
+.nodeContent {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.branchBadgeLine {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 3px 4px 0;
+}
+
+.branchBadgeButton,
+.branchBadgeStatic {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 0;
+}
+
+.branchBadgeButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.branchBadgeButton:hover { opacity: .78; }
+.branchBadgeButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
+.mainBadge,
+.forkBadge,
+.cloneBadge,
+.currentChip {
+  flex: none;
+  font-size: 10px;
+  line-height: 14px;
+}
+.mainBadge { color: var(--dsw-alias-label-secondary); }
+.forkBadge { color: var(--dsw-alias-state-business-primary); }
+.cloneBadge { color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)); }
+.currentChip {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+  color: var(--dsw-alias-state-business-primary);
+}
+.branchChip {
+  flex: none;
+  overflow: hidden;
+  max-width: 96px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--dsw-specific-tip);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runningDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary, var(--dsw-alias-state-business-primary));
+}
+
+.select {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 4px 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* Tool interactions are quiet gray: no business-primary highlight on the role
+   chip or the summary. Only a failed call is highlighted, in error red. */
+.nodeTool .role,
+.nodeTool .summary { color: var(--dsw-alias-label-tertiary); }
+.nodeError .role,
+.nodeError .summary { color: var(--dsw-alias-state-error-primary); }
+
+.nodeTopline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  width: 100%;
+}
+.role {
+  flex: none;
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 10px;
+  line-height: 14px;
+}
+.branch,
+.head {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch { max-width: 76px; }
+.head {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--dsw-specific-tip);
+  color: var(--dsw-alias-state-success-primary, var(--dsw-alias-state-business-primary));
+}
+.summary {
+  display: block;
+  overflow: hidden;
+  min-width: 0;
+  width: 100%;
+  color: var(--dsw-alias-label-primary-dimmed);
+  font-size: 12px;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Keep rows compact normally, but never discard the underlying message text.
+   Clicking the row (or activating it with the keyboard — the same click path)
+   reveals the complete content inside a bounded scroll area; hovering never
+   expands anything, avoiding native-tooltip length limits. */
+.nodeMessageOpen .summary {
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: min(60vh, 560px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.forkAction {
+  display: grid;
+  flex: none;
+  align-self: center;
+  justify-self: center;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #a1a1aa);
+  cursor: pointer;
+}
+.forkAction svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.forkAction:hover {
+  color: var(--dsw-alias-label-primary, #f4f4f5);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.focusAction {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary, #8a8a93);
+  cursor: pointer;
+}
+.focusAction svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+}
+.focusAction:hover {
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.rowActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding-right: 2px;
+}
+.forkActionPlaceholder {
+  width: 24px;
+  height: 24px;
+}
+.focusBar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.focusAll,
+.focusExit {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-state-business-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.focusAll:hover,
+.focusExit:hover { text-decoration: underline; }
+.focusCrumb {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focusExit { margin-inline-start: auto; font-size: 16px; }
+
+.empty,
+.error {
+  margin: 8px 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.empty { color: var(--dsw-alias-label-tertiary); }
+.error { color: var(--dsw-alias-state-error-primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .node, .refresh, .forkAction { transition: none; }
+}
+
+@media (max-width: 640px) {
+  .overlayDrawer {
+    width: 100%;
+    border-inline-start: 0;
+    box-shadow: none;
+  }
+}

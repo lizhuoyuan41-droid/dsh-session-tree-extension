@@ -1,0 +1,20 @@
+{
+  "extends": "../../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "paths": {
+      "@robiteame/dsh-pi-agent-session-tree": [
+        "../../extensions/pi-agent-session-tree/lib/types/index.d.ts"
+      ],
+      "@robiteame/dsh-pi-agent-session-tree/client": [
+        "../../extensions/pi-agent-session-tree/lib/types/client.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "src"
+  ]
+}

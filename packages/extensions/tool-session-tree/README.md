@@ -1,0 +1,99 @@
+# tool-session-tree
+
+English | [中文](README.zh.md)
+
+Model-facing companion of the session-tree service: the `session_tree` tool,
+the `/tree` command family, and a system-prompt section over the shared
+append-only session-tree store. All state lives in
+`sessionTreeStore` (`@robiteame/dsh-pi-agent-session-tree`), so the model,
+the command line, and the browser panel observe the same trees.
+
+## Surfaces
+
+| Surface | Name | Notes |
+|---|---|---|
+| Tool | `session_tree` | one tree per agent session; operations below |
+| Command | `/tree` | Opens/refreshes the right sidebar; low-level subcommands remain available for automation |
+| Commands | `/fork`, `/clone`, `/session` | Fork a selected user message or clone the whole session, without entering IDs; inspect tree status |
+
+## Tool operations
+
+`create`, `append`, `list`, `branches`, `tree`, `jump`, `fork`, `clone`,
+`context`, `session`, `branch`, `branch.summary`, `snapshot.save`,
+`snapshot.load`, `sessions`.
+
+- `context` returns `{cursor, messages}` — the standard LLM messages array for
+  the root→cursor path.
+- `branch` parks the cursor at an existing node and names the next append's
+  branch; `branch.summary` additionally appends a summary node. Historical
+  nodes are never modified or deleted.
+- `snapshot.save` returns the versioned snapshot; `snapshot.load` restores it
+  under the same sessionId (`version: 1`).
+
+Every operation answers `{ok: true, value}` or
+`{ok: false, error: {code, message}}`, so tool results are always lossless
+JSON with a stable failure vocabulary. `/fork` opens a user-prompt selector;
+`/clone` duplicates the current conversation as-is. Both create a new session
+under the source project.
+
+## Tool examples
+
+```json
+{"operation":"create","sessionId":"demo"}
+{"operation":"append","sessionId":"demo","message":{"role":"user","content":"Explore option A"}}
+{"operation":"append","sessionId":"demo","message":{"role":"assistant","content":"Baseline answer"}}
+{"operation":"branch","sessionId":"demo","nodeId":"<root-nodeId>","branch":"option-b"}
+{"operation":"append","sessionId":"demo","message":{"role":"user","content":"Explore option B"},"branch":"option-b"}
+{"operation":"context","sessionId":"demo"}
+{"operation":"snapshot.save","sessionId":"demo"}
+{"operation":"snapshot.load","sessionId":"demo","snapshot":{"version":1,"sessionId":"demo","cursor":null,"activeBranch":"main","nodes":[]}}
+```
+
+## Model Experience
+
+### System prompt
+
+#### What the model sees
+
+A fixed section tells the model that the tree projects the durable Harness Session log: native turns synchronize automatically, `context` reads the active branch after navigation, `append` is only for explicit custom entries, and branching never edits history. The `surface` field reported by `context` and `session` states the active surface mode (`native`, `stock`, or `projection`).
+##### SessionTree guidance
+
+```markdown
+SessionTree is the append-only projection of this agent's durable Harness Session log. Native user, assistant, tool, and model-context events are synchronized automatically: never duplicate ordinary turns with operation 'append'. Before answering after navigation, call session_tree with operation 'context' and treat its root-to-cursor messages as the active branch context. Use 'append' only for an explicit custom tree entry not already recorded by Harness. To explore an alternative, call 'fork' or 'branch' with a historical nodeId and branch name (or 'branch.summary' to record a summary); old nodes are never modified or deleted. Use 'branches' and 'tree' to inspect topology, and 'snapshot.save'/'snapshot.load' for explicit export or full-tree restore. All operations report failures as {ok:false,error:{code,message}}. Depending on the Harness build, jump/fork switch the model-visible history either through the native selected-surface API or through an official replace-surface emulation; when neither is available the tree is projection-only. The surface field reported by 'context' and 'session' states the active mode: native, stock, or projection.
+```
+
+#### Token effect
+
+Small fixed input cost on every request where this plugin's prompt registration is in scope, plus the returned JSON for each `context` call.
+
+#### KV Cache effect
+
+Prefix-stable while the plugin scope and guidance text are unchanged. The `context` result is dynamic output and never joins the reusable prefix.
+
+### Tool schemas and results
+
+#### What the model sees
+
+The generated [`session_tree` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-session-tree) (one `operation` discriminant plus JSON payload fields). Successful results are compact JSON envelopes; a failed operation returns `{ok: false, error: {code, message}}` instead of throwing.
+
+#### Token effect
+
+Fixed schema cost plus one compact result per call.
+
+#### KV Cache effect
+
+Schemas are prefix-stable while their definitions and visibility are unchanged. Calls and results append after the reusable request prefix.
+
+## Known Limitations and Deferred Work
+
+- **Native events are durable** — the tree is rebuilt from the Harness Session
+  event log on live sync; explicit snapshots provide full-tree export and
+  restore, while the native model surface follows the active leaf.
+- **Patched versus official Harness** — a patched checkout persists
+  `session-tree/*` markers and uses the selected-surface API. An official
+  Bundle appends an official `replace` surface event when the cursor moves and
+  persists branch metadata in the sidecar at
+  `$DSH_HOME/storages/session-tree/<sessionId>.json`.
+- **The store is process-wide** — a restarted process reconstructs trees from
+  persisted Session events, and on an official Bundle additionally restores
+  the sidecar before the owning agent's next pre-step.

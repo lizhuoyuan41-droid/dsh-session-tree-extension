@@ -1,0 +1,349 @@
+## 0.1.0 — 2026-11-09
+
+### Added
+
+This is the first release of this repository. It is based on the upstream
+[`robiteame/dsh-session-tree-extension`](https://github.com/robiteame/dsh-session-tree-extension);
+the original copyright notice and full MIT license text are retained in
+[`LICENSE`](./LICENSE).
+
+- **Subtree focus**: fork-point rows expose a focus action that isolates the
+  node and every descendant branch; the focused node becomes lane 0, pins to
+  the top, and the panel scrolls back to it. Breadcrumb “All / node” and Esc
+  exit focus.
+- Focus is remembered across Session switches and sidebar remounts, survives
+  navigation inside the focused subtree, and only clears when the active
+  Session moves outside it.
+- Branch rows take their name from the fork’s first own prompt, then follow a
+  later dynamic title; a fork with no own prompt falls back to
+  `parent · fork N`.
+- Reused the native branch icon/size for the tree fork action.
+
+### Fixed
+
+- Nested forks insert at `parent lane + 1` instead of a global low lane.
+- Branch colours stay bound to the permanent branch number, are reused
+  unchanged when filtering, and archived outer branches no longer hand their
+  colour to the next branch.
+- Every branch-menu level now expands/collapses with height + fade and becomes
+  inert when closed; the menu can no longer scroll the sidebar horizontally.
+- Native archived filter still gates the inline archived block; archived rows
+  sort last and use the parent Session’s name.
+- Lane assignment no longer folds branch 1 onto lane 0 when more than four
+  top-level branches exist.
+
+### Verified
+
+- `node scripts/build.mjs`, Host + Client type checks,
+  `scripts/verify-bundle.mjs --pack`, and all 198 tests with coverage pass from
+  `main`.
+- Release artifacts were packed from `main` and installed into the desktop and
+  tree-test profiles; client bundle hashes match the source build.
+
+## 0.7.2 — 2026-11-03
+
+### Changed
+
+- Updated all Harness development dependencies and the lockfile to
+  `0.2.1-rc.5`, the published `latest` and `next` release. Cordis remains
+  `4.0.5`; the existing `^0.2.1-rc.2` peer ranges accept the new host.
+- Updated installation and development documentation to use the rc.5
+  verification baseline and 0.7.2 package examples. Contributor source
+  patches remain scoped to `dsh-v0.2.1-rc.2`.
+
+### Verified
+
+- `pnpm verify` passes against the published rc.5 packages: standalone build,
+  Host and Client type checks, all four packed artifacts, and all 125 tests.
+  Coverage: 84.80% statements, 76.32% branches, 89.00% functions, and 90.77%
+  lines.
+- Installed the four local 0.7.2 tarballs through the published rc.5 CLI
+  plugin manager in an isolated profile. The bundle activates and composes
+  all three rows; the WebUI boots and `/tree` opens the native right-Sidebar
+  tab without browser warnings or errors. No model API request was needed.
+  [Smoke screenshot](./gui-test-screenshots/harness-rc5-session-tree.png).
+
+## 0.7.1 — 2026-10-25
+
+### Fixed
+
+- The WebUI client half no longer probes optional `sidebarRight`,
+  `sidebarRightTabs`, and `uiWorkspace` services with `Reflect.has(ctx, name)`
+  before reading them. Cordis 4.0.5 rejects that pair with
+  `cannot get property "sidebarRightTabs" without inject`, so the client entry
+  failed to activate during web boot and the desktop UI stayed on the boot
+  screen. The optional faces are now read through the inject-free `ctx.get()`,
+  preserving the legacy details-panel fallback when the services are absent.
+- Verified against the desktop 0.2.1-rc.3 host with a real 422-node session:
+  the profile boots, the right-sidebar Session Tree tab renders the merged
+  graph, and `/tree` opens the panel without a web-boot failure.
+
+### Verified
+
+- Full suite: 125 tests pass; host/client type checks and the packed-artifact
+  gate pass against the published 0.2.1-rc.3 packages.
+
+## 0.7.0 — 2026-10-24
+
+### Changed
+
+- Targeted the latest DeepSeek-Harness release, `0.2.1-rc.3` (the published
+  `next`), and Cordis `~4.0.5`. Peer ranges accept the whole
+  `0.2.1-rc.2`–`0.2.1-rc.3` line, so the same packages serve the latest CLI and
+  the current desktop build (`0.2.1-rc.2`).
+- Verified the current desktop runtime end to end: the desktop's bundled
+  `0.2.1-rc.2` host composed the three session-tree rows, mounted the
+  `sessionTree` Remote, and served the tree client module in the web boot
+  graph. The `dsh.client` manifest (`inject`, `platform: web`) and module-loader
+  bundle format are unchanged from the release line.
+- Regenerated the Typert artifacts for the 0.2.1 release contract. The release
+  loader requires a `codec.create()` factory and the client remote factory
+  expects a `createTypertRemoteInfo` method map, while the frozen alpha
+  artifacts stored `codec.schema` and a descriptor array. The templates now
+  upgrade the codecs in place and wrap the remote descriptors, so the same
+  artifacts load on both `0.2.1-rc.2` (desktop) and `0.2.1-rc.3`.
+- Desktop install instructions now use the in-app plugin market: the desktop's
+  bundled `0.2.1-rc.2` CLI only forwards `dsh plugin` to pnpm, while the
+  `0.2.1-rc.3` CLI activates a newly installed bundle automatically.
+- Regenerated `dev/session-branch-surface.patch` against the
+  `dsh-v0.2.1-rc.2` source tag; it now follows the release's generic
+  `SurfaceIntent<T>` and first-class `ToolResultMessage.toolCallId` shape and
+  extends the selected path from `Session.commit()`.
+
+### Fixed
+
+- Clean-checkout declaration builds resolve the sibling Host package through
+  explicit TypeScript paths instead of relying on a stale workspace link, and
+  the client package declares the generated remote contract locally so
+  `pnpm typecheck` works before `lib/` exists.
+
+### Verified
+
+- Full repository gate against the published `0.2.1-rc.3` packages: build,
+  host/client type checks, packed artifact validation, and 125 unit/browser
+  tests including the new Typert contract regression.
+- The same build and all 125 tests pass against the published `0.2.1-rc.2`
+  packages used by the desktop.
+- The desktop `0.2.1-rc.2` runtime boots a profile containing the 0.7.0
+  tarballs with no activation warnings; its boot graph includes
+  `@robiteame/dsh-client-ui-session-tree` and the served client bundle carries
+  the mounted `TYPERT_REMOTE` method map.
+- Both contributor patches apply cleanly to a fresh `dsh-v0.2.1-rc.2` source
+  worktree.
+
+## 0.6.0 — 2026-10-13
+
+### Changed
+
+- Targeted the latest DeepSeek-Harness release, `0.2.1-alpha.2`, while keeping
+  the matching Cordis `~4.0.5-alpha.1` peer line; all `@deepseek-ai/*`
+  development and peer versions moved to the new published packages.
+- Regenerated both contributor source patches against the exact
+  `dsh-v0.2.1-alpha.2` tag. The native branch-surface patch now understands
+  the 0.2.1 first-class `ToolResultMessage.toolCallId` shape and
+  `SurfaceManager.contentGeneration` cache invalidation.
+- Simplified `dev/harness.patch` to the current source layout: composition
+  rows, carrier dependencies, TypeScript aliases, and host/client project
+  references only. The current official WebUI already exposes the extensible
+  right Sidebar, so the legacy details-dock/UI source edits and generated
+  catalog/lockfile patches are no longer required.
+
+### Fixed
+
+- Removed redundant sibling-package `devDependencies`; root TypeScript path
+  mappings already cover standalone checks, while published `dependencies` and
+  `peerDependencies` remain normal semver ranges. Source installs inside a
+  Harness workspace no longer try to fetch an unpublished `@robiteame` package.
+
+### Verified
+
+- Full repository gate against the published `0.2.1-alpha.2` Harness packages:
+  build, host/client type checks, packed artifact validation, and the complete
+  unit/browser test suite.
+- Both development patches apply cleanly and reversibly to a fresh
+  `dsh-v0.2.1-alpha.2` source worktree.
+
+## 0.5.0 — 2026-10-06
+
+### Changed
+
+- Targeted the latest DeepSeek-Harness release line, `0.2.1-alpha.1`, and
+  Cordis `~4.0.5-alpha.1`; the `@deepseek-ai/*` peer ranges moved accordingly.
+- Adapted to Harness 0.2.1's new session events (`llm/retry`,
+  `llm/retry-started`) and the additive right-Sidebar / client-contract
+  changes: the tree projection ignores unknown event types it does not model,
+  so retry diagnostics never disturb node identity or the append-only log.
+
+### Removed
+
+- The `./invariant` companion exports from all three implementation packages.
+  Harness 0.2.1 removed the runtime invariant plugins and the
+  `@deepseek-ai/dsh-invariants` package from its dependency tree; the
+  companions were empty registrations that the composition never mounted, so
+  dropping them keeps installs clean on 0.2.1 hosts.
+
+### Verified
+
+- Full repository gate against the published `0.2.1-alpha.1` Harness packages:
+  build, host/client type checks, packed artifact validation, and the complete
+  unit/browser test suite (111 tests).
+
+## 0.4.0 — 2026-09-30
+
+### Changed
+
+- Targeted the latest DeepSeek-Harness release line, `0.2.0-rc.2`, including
+  Session format v4 and Cordis `~4.0.4`.
+- The WebUI now registers the tree as a native page in Harness 0.2's extensible
+  right Sidebar. `/tree` opens and focuses that persistent tab; older stock
+  builds continue to use the additive overlay fallback.
+- Session selection follows the 0.2 `mainView` retain model, while remaining
+  compatible with the previous `SessionListState.current` shape.
+
+### Fixed
+
+- Tool-result projection understands Harness 0.2's first-class tool message
+  (`toolCallId` / `isError` on the message) and still reads older nested
+  `tool-result` blocks from stored logs.
+- Stock-surface cursor markers now use the system-prompt message source required
+  by Session format v4, so repeated navigation remains resume-valid.
+
+### Verified
+
+- Full repository gate against the published `0.2.0-rc.2` Harness packages:
+  build, host/client type checks, packed artifact validation, and the complete
+  unit/browser test suite.
+
+# Changelog
+
+## 0.3.0 — 2026-09-14
+
+### Changed
+
+- The WebUI Session Tree now merges every non-subagent Session in the current
+  lineage into one git-style graph. Native fork/clone prefixes are deduplicated
+  by both `nodeId` and `sessionEventSeq`; branch-specific nodes keep
+  session-qualified identities. Fork points carry main/fork/clone badges, the
+  open Session's path is highlighted, Session branches and node subtrees can
+  collapse independently, and clicking another Session's node opens that
+  Session before jumping. Tree loading fans out after an 80 ms debounce and
+  isolates per-Session failures behind placeholders. The previous separate
+  right-panel branch summary is absorbed into this graph.
+- Session-tree user messages now separate typed human prompts from
+  harness-injected context (skill catalog prompts, system-prompt snapshots,
+  context notices). Injected `user/message` events are still projected into the
+  append-only tree — jump/fork re-select the model-visible surface from the
+  tree path, so dropping them would strip skill and runtime context from later
+  model turns — but they carry `metadata.injected` and are hidden from every
+  user-facing surface: the `/tree` panel, the `/fork` prompt selector, the
+  `/fork` `userNodeCount`, and the previous-prompt fork-menu title. Producer
+  `source.kind` drives the split (`'user'` is typed input; `'plugin'`,
+  `'skill-catalog'`, and other kinds are injected); legacy string or missing
+  sources stay presented as human input. The sidecar format version bumped
+  1 → 2 so cached trees built before the marker re-project from the native
+  Session log.
+- The `/tree` panel row preview expands on click (toggling the complete node
+  message in a bounded scroll area) instead of on hover; the native hover
+  title tooltip on the summary was removed and the row-count stat now counts
+  only displayed (non-injected) nodes.
+- The packages now target DeepSeek-Harness `0.1.5-rc.2`: the tree-restore
+  cursor is written as a real `system/message` surface event, which needs the
+  surface semantics introduced in the `0.1.5` line. The `@deepseek-ai/*` peer
+  ranges moved from `^0.1.2-alpha.3` to `^0.1.5-rc.2` accordingly.
+
+### Fixed
+
+- The `/fork` prompt selector lists every typed prompt again instead of only
+  the tree root. Prompts-only mode re-parents each user message to its nearest
+  displayed prompt, so a prompt whose assistant/tool ancestor is filtered out
+  no longer becomes unreachable in the row graph.
+
+## 0.2.1 — 2026-09-10
+
+### Fixed
+
+- Compatibility with published Harness builds whose core `Session` class does
+  not expose the agent-facing `events` array: the tree sync, fork seed,
+  surface-seq, and canonical-surface walks now read the log through
+  `snapshotEvents()` when `events` is absent. `/tree`, `/fork`, and `/clone`
+  previously died in those hosts with
+  `gateway/internal: Cannot read properties of undefined (reading 'at')`;
+  they now run end-to-end there (verified against the packaged web profile).
+
+## 0.2.0 — 2026-09-09
+
+### Changed
+
+- The WebUI `/fork` presentation moved from the left-docked branch rail to
+  inline collapsible branch menus portaled directly beneath their source
+  Session's native row. The native list keeps owning the source row; native
+  rows for `/fork` descendants are hidden while `/clone` rows stay untouched.
+  Topology and liveness still come exclusively from the official reactive
+  Session list.
+- Fork branch titles now derive from the user prompt preceding the selected
+  node instead of the selected node's own text, so menu entries read as the
+  turn the branch continues from.
+
+### Added
+
+- `previousUserPrompt` on sessionTree fork views and the typert remote
+  payloads: the preceding user prompt carried alongside `prompt` for use as
+  the inline fork-menu title.
+- Repository CI (`.github/workflows/ci.yml`): Node 22/24 matrix running the
+  full `pnpm verify` gate. Uses only Node-24-runtime actions
+  (`actions/checkout@v5`, `actions/setup-node@v5`); Node-20 actions are
+  deprecated on GitHub runners and fully removed after 2026-09-23. pnpm is
+  activated through corepack and pinned via `packageManager` in the root
+  `package.json`.
+
+## 0.1.0 — 2026-09-07
+
+First publishable release of the session-tree plugin as npm packages.
+
+### Added
+
+- Four npm packages under `@robiteame`: the `dsh-session-tree` carrier Bundle
+  (composition layer mounting the three implementation packages) plus
+  `dsh-pi-agent-session-tree`, `dsh-tool-session-tree`, and
+  `dsh-client-ui-session-tree`, each shipping prebuilt `lib/` artifacts with
+  semver peer ranges (DeepSeek-Harness `^0.1.2-alpha.3`, Cordis `^4.0.2`) and
+  no lifecycle scripts.
+- `sessionTreeSurfaceMode()` and the `surface` field on `session_tree`
+  `context`/`session` operations and `/tree` outputs, reporting the active
+  engine mode (`native`, `stock`, or `projection`).
+- One-time Host-log notices for stock-surface and projection modes.
+- Standalone build (`scripts/build.mjs`), typecheck (host + client passes),
+  artifact verification (`scripts/verify-bundle.mjs`), and a vitest suite that
+  runs against the published Harness packages without a checkout.
+
+### Changed
+
+- Renamed the packages from the `@deepseek-ai` development scope to
+  `@robiteame` (typert contracts, composition rows, imports, and docs follow).
+- The repository root became a private orchestrator; the previous root
+  standalone bundle was replaced by the four-package carrier structure.
+- `harness.patch` moved to `dev/` and was split: the optional
+  `Session.selectMessageSurface()` engine capability now lives in
+  `dev/session-branch-surface.patch`; composition/registration remains in
+  `dev/harness.patch`; the installer moved to `dev/install.sh`.
+
+### Fixed
+
+- Cloning on a stock Harness dropped the clone's derived history: synthetic
+  cursor events are no longer copied into the clone seed, and the store
+  watermark is clamped for empty event logs.
+- Repeated stock-surface cursor rewrites could leave a stored session that
+  fails resume validation (`surface replace: start seq … not found`). Replace
+  events are now computed against the canonical replayed surface, keeping the
+  durable log resume-valid across unlimited navigations (regression-tested).
+- Unwritable stock surfaces are detected before appending; such builds degrade
+  to projection mode instead of leaving a truncated live path.
+
+### Verified
+
+- End-to-end on an unpatched Harness `0.1.2-alpha.3` checkout via tarball
+  install: `/tree list|context|jump|fork`, `/fork`, `/clone`, `/session`,
+  panel rendering with click-selection, light/dark themes, restart-safe
+  branch state through the sidecar, and clean uninstall.
+- Native branch switching (patched checkout): the model-visible history
+  genuinely switches after jump/fork; full suite passes in both modes.

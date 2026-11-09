@@ -1,0 +1,763 @@
+/**
+ * Append-only multi-branch session tree. One tree owns one sessionId; the
+ * store holds many trees side by side. All mutations are additions: a node
+ * is never edited or removed after creation, and navigation only moves the
+ * cursor, so every history branch survives (PI-Agent SessionTree semantics:
+ * append-only entries, leaf-pointer branching, root-to-leaf message paths).
+ *
+ * @module @robiteame/dsh-pi-agent-session-tree/session-tree
+ */
+
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { attachToolResult } from './session-event-adapter.ts'
+import type {
+  BranchView,
+  JsonValue,
+  JumpView,
+  ContentPart,
+  LlmMessage,
+  SessionTreeSessionInfo,
+  SessionTreeSnapshot,
+  SessionTreeView,
+  TreeEntryType,
+  TreeNode,
+  SessionTreeLogEntry,
+  TreeErrorCode,
+  TreeResult,
+} from './types.ts'
+
+const SNAPSHOT_VERSION = 1
+
+const fail = <T>(code: TreeErrorCode, message: string): TreeResult<T> =>
+  ({ ok: false, error: { code, message } })
+
+/** Deep-clone a JSON-safe value so callers can never alias internal nodes. */
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
+/** Mint a short unique node id (collision-safe enough for one store). */
+function nodeId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/** One stored node plus the internal cursor bookkeeping. */
+export class SessionTree {
+  private readonly nodesById = new Map<string, TreeNode>()
+  private cursorId: string | null = null
+  private selectedNodeId: string | null = null
+  private activeBranchName = 'main'
+  private readonly branchHeads = new Map<string, string>()
+  private syncedSessionEventSeq = -1
+  /** Monotonic projection revision; the sidecar skips unchanged trees. */
+  private revisionValue = 0
+
+  /**
+   * Create an empty tree, or restore one from a versioned snapshot.
+   * @param sessionId - owning session identity.
+   * @param snapshot - optional durable snapshot to restore.
+   * @throws Error when the snapshot is malformed (version, ownership, cursor).
+   */
+  constructor(readonly sessionId: SessionId, snapshot?: unknown) {
+    if (snapshot === undefined) return
+    if (!isSnapshot(snapshot, sessionId)) throw new Error('invalid session tree snapshot')
+    const migrated = foldLegacyToolResultPairs(snapshot)
+    for (const node of migrated.nodes) this.nodesById.set(node.nodeId, clone(node))
+    this.cursorId = migrated.cursor
+    this.selectedNodeId = migrated.selectedNodeId ?? null
+    if (typeof migrated.nativeEventSeq === 'number') this.syncedSessionEventSeq = migrated.nativeEventSeq
+    if (typeof migrated.activeBranch === 'string') this.activeBranchName = migrated.activeBranch
+    if (migrated.branchHeads !== undefined) {
+      for (const [name, head] of Object.entries(migrated.branchHeads)) {
+        if (this.nodesById.has(head)) this.branchHeads.set(name, head)
+      }
+    }
+    if (this.cursorId !== null && this.branchHeads.size === 0) {
+      this.branchHeads.set(this.activeBranchName, this.cursorId)
+    }
+  }
+
+  /** Number of nodes without cloning the tree (used by sidecar write policy). */
+  get size(): number {
+    return this.nodesById.size
+  }
+
+  /** @returns a monotonic revision that advances on every projection mutation. */
+  get revision(): number {
+    return this.revisionValue
+  }
+
+  private touch(): void {
+    this.revisionValue += 1
+  }
+
+  /** Mint a node id guaranteed absent from this tree (collision-safe). */
+  private mintNodeId(): string {
+    let id = nodeId()
+    while (this.nodesById.has(id)) id = nodeId()
+    return id
+  }
+
+  /** @returns the current cursor node id, or null before the first append. */
+  get cursor(): string | null {
+    return this.cursorId
+  }
+
+  /** Explicit node bound to context-aware UI commands. */
+  get selectedNode(): string | null {
+    return this.selectedNodeId
+  }
+
+  /** Bind /fork and /clone to an existing node without changing cursor semantics. */
+  select(nodeId: string): TreeResult<{ nodeId: string }> {
+    if (!this.nodesById.has(nodeId)) return fail('NODE_NOT_FOUND', `node '${nodeId}' was not found`)
+    this.selectedNodeId = nodeId
+    this.touch()
+    return { ok: true, value: { nodeId } }
+  }
+
+  /** @returns the branch label the next append joins. */
+  get activeBranch(): string {
+    return this.activeBranchName
+  }
+
+  /**
+   * Append one new node as a child of the cursor. The cursor's parent chain
+   * is never touched; the new node joins the active branch unless one is
+   * named. Historical nodes stay byte-identical.
+   * @param message - standard LLM message to carry.
+   * @param options - optional branch override, summary, and JSON extras.
+   * @returns the created node, or a standard error for invalid input.
+   */
+  /** Capture mutable projection state so an external durable write can commit atomically. */
+  checkpoint(): SessionTreeSnapshot {
+    return this.snapshot()
+  }
+
+  /** Roll back to a previously captured checkpoint after a durable append fails. */
+  rollback(snapshot: SessionTreeSnapshot): TreeResult<void> {
+    if (!isSnapshot(snapshot, this.sessionId)) return fail('INVALID_SNAPSHOT', 'checkpoint does not belong to this session')
+    this.nodesById.clear()
+    for (const node of snapshot.nodes) this.nodesById.set(node.nodeId, clone(node))
+    this.cursorId = snapshot.cursor
+    this.selectedNodeId = snapshot.selectedNodeId ?? null
+    this.activeBranchName = snapshot.activeBranch
+    this.branchHeads.clear()
+    for (const [name, head] of Object.entries(snapshot.branchHeads ?? {})) this.branchHeads.set(name, head)
+    this.syncedSessionEventSeq = snapshot.nativeEventSeq ?? -1
+    this.touch()
+    return { ok: true, value: undefined }
+  }
+
+  append(
+    message: LlmMessage,
+    options: { branch?: string; summary?: string; content?: readonly ContentPart[]; model?: string; usage?: Record<string, JsonValue>; cost?: number; error?: string; metadata?: Record<string, JsonValue> } = {},
+  ): TreeResult<TreeNode> {
+    if (!isMessage(message)) return fail('INVALID_ARGUMENT', 'message.role and message.content are required')
+    if (options.content !== undefined && (!Array.isArray(options.content) || options.content.some(part => !isContentPart(part)))) {
+      return fail('INVALID_ARGUMENT', 'content must be an array of valid content parts')
+    }
+    if (options.usage !== undefined && !isJsonRecord(options.usage)) {
+      return fail('INVALID_ARGUMENT', 'usage must be a JSON object')
+    }
+    if (options.metadata !== undefined && !isJsonRecord(options.metadata)) {
+      return fail('INVALID_ARGUMENT', 'metadata must be a JSON object')
+    }
+    if (options.model !== undefined && typeof options.model !== 'string') {
+      return fail('INVALID_ARGUMENT', 'model must be a string')
+    }
+    if (options.cost !== undefined && !Number.isFinite(options.cost)) {
+      return fail('INVALID_ARGUMENT', 'cost must be finite')
+    }
+    if (options.error !== undefined && typeof options.error !== 'string') {
+      return fail('INVALID_ARGUMENT', 'error must be a string')
+    }
+    const branch = options.branch === undefined ? this.activeBranchName : options.branch.trim()
+    if (branch.length === 0) return fail('INVALID_ARGUMENT', 'branch must not be empty')
+    const node: TreeNode = {
+      nodeId: this.mintNodeId(),
+      parentId: this.cursorId,
+      forkCount: 0,
+      type: 'message',
+      branch,
+      summary: options.summary?.trim() || summarize(message.content),
+      createdAt: new Date().toISOString(),
+      message: clone(message),
+      content: clone(options.content ?? [{ type: 'text', text: message.content }]),
+      ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.usage === undefined ? {} : { usage: clone(options.usage) }),
+      ...(options.cost === undefined ? {} : { cost: options.cost }),
+      ...(options.error === undefined ? {} : { error: options.error }),
+      ...(options.metadata === undefined ? {} : { metadata: clone(options.metadata) }),
+    }
+    this.nodesById.set(node.nodeId, node)
+    this.cursorId = node.nodeId
+    this.activeBranchName = branch
+    this.branchHeads.set(branch, node.nodeId)
+    this.touch()
+    return { ok: true, value: clone(node) }
+  }
+
+  /**
+   * Move the cursor to an existing node (root-to-node path replay). Old
+   * branches remain intact; the next append forks from the target.
+   * @param target - target node id, or null to reset before any node.
+   * @returns the new cursor and the reconstructed root-to-cursor messages.
+   */
+  jump(target: string | null): TreeResult<JumpView> {
+    if (target !== null && !this.nodesById.has(target)) {
+      return fail('NODE_NOT_FOUND', `node '${target}' was not found`)
+    }
+    this.cursorId = target
+    const node = target === null ? undefined : this.nodesById.get(target)
+    this.activeBranchName = node?.branch ?? this.activeBranchName
+    // Navigation changes only the current leaf. Named branch heads are
+    // durable pointers and must not move merely because the user browses.
+    this.touch()
+    return { ok: true, value: { cursor: this.cursorId, messages: this.messagesFrom(target) } }
+  }
+
+  /**
+   * Fork the active cursor from a historical node. This is the Pi `/fork`
+   * primitive: old nodes remain intact and the next tree append becomes a child.
+   * The owning service selects the matching Harness model surface path.
+   */
+  fork(target: string, branch = 'fork'): TreeResult<{ cursor: string; branch: string; forkCount: number }> {
+    const result = this.branch(target, branch)
+    if (!result.ok) return fail(result.error.code, result.error.message)
+    const count = this.directChildren(target).length
+    return { ok: true, value: { cursor: target, branch: result.value.branch, forkCount: count } }
+  }
+
+  /** The latest typed user prompt: the only node the fork primitive accepts. */
+  private latestUserNode(): TreeNode | undefined {
+    const nodes = this.list()
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const node = nodes[index]!
+      if (node.message?.role === 'user' && node.metadata?.injected !== true) return node
+    }
+    return undefined
+  }
+
+  /**
+   * Set the branch label the next append joins and park the cursor at the
+   * chosen node, without appending anything.
+   * @param target - node to branch from (must exist).
+   * @param branch - new branch label (non-empty).
+   * @returns the new cursor and branch.
+   */
+  branch(target: string, branch: string): TreeResult<{ cursor: string; branch: string }> {
+    if (!this.nodesById.has(target)) return fail('NODE_NOT_FOUND', `node '${target}' was not found`)
+    const latest = this.latestUserNode()
+    if (latest === undefined || latest.nodeId !== target) {
+      return fail('STALE_FORK_POINT', 'only the latest user turn can be forked')
+    }
+    const trimmed = branch.trim()
+    if (trimmed.length === 0) return fail('INVALID_ARGUMENT', 'branch must not be empty')
+    this.cursorId = target
+    this.activeBranchName = trimmed
+    this.branchHeads.set(trimmed, target)
+    this.touch()
+    return { ok: true, value: { cursor: target, branch: trimmed } }
+  }
+
+  /**
+   * Branch with a summary of the abandoned path: park the cursor at `target`
+   * (like {@link branch}), then append a summary node whose parent is the
+   * target. The abandoned branch's nodes stay untouched.
+   * @param target - node to branch from.
+   * @param summary - summary text stored on the new node.
+   * @returns the created summary node.
+   */
+  branchWithSummary(target: string, summary: string): TreeResult<TreeNode> {
+    if (!this.nodesById.has(target)) return fail('NODE_NOT_FOUND', `node '${target}' was not found`)
+    const latest = this.latestUserNode()
+    if (latest === undefined || latest.nodeId !== target) {
+      return fail('STALE_FORK_POINT', 'only the latest user turn can be forked')
+    }
+    if (summary.trim().length === 0) return fail('INVALID_ARGUMENT', 'summary must not be empty')
+    this.cursorId = target
+    const node: TreeNode = {
+      nodeId: this.mintNodeId(),
+      parentId: target,
+      forkCount: 0,
+      type: 'branch_summary',
+      branch: this.activeBranchName,
+      summary: summary.trim(),
+      createdAt: new Date().toISOString(),
+      content: [{ type: 'text', text: summary.trim() }],
+      metadata: { kind: 'branch_summary', from: target },
+    }
+    this.nodesById.set(node.nodeId, node)
+    this.cursorId = node.nodeId
+    this.branchHeads.set(this.activeBranchName, node.nodeId)
+    this.touch()
+    return { ok: true, value: clone(node) }
+  }
+
+  /**
+   * Reconstruct the standard LLM messages array for the path root→node
+   * (defaults to the cursor). System/user/assistant/tool messages keep their
+   * roles; branch-summary nodes carry no message and stay out of the array.
+   * @param from - target node id, or null for the empty path.
+   * @returns messages in conversation order (root first).
+   */
+  messages(from: string | null = this.cursorId): LlmMessage[] {
+    return this.messagesFrom(from)
+  }
+
+  /**
+   * @returns all nodes in creation order (defensive copies).
+   */
+  log(fromSeq = 0): SessionTreeLogEntry[] {
+    return this.list().slice(fromSeq).map((node, index) => ({ seq: fromSeq + index, node }))
+  }
+
+  replay(records: readonly SessionTreeLogEntry[]): TreeResult<{ applied: number }> {
+    let expected = this.nodesById.size
+    const known = new Set(this.nodesById.keys())
+    for (const record of records) {
+      if (record.seq !== expected || known.has(record.node.nodeId)) return fail('INVALID_SNAPSHOT', 'session tree log sequence or node identity is invalid')
+      if (!isNode(record.node) || (record.node.parentId !== null && !known.has(record.node.parentId))) return fail('INVALID_SNAPSHOT', 'session tree log topology is invalid')
+      known.add(record.node.nodeId)
+      expected += 1
+    }
+    for (const record of records) {
+      this.nodesById.set(record.node.nodeId, clone(record.node))
+      const nativeSeq = record.node.metadata?.sessionEventSeq
+      if (typeof nativeSeq === 'number') this.markSessionEventSeq(nativeSeq)
+    }
+    const last = records[records.length - 1]?.node
+    if (last !== undefined) {
+      this.cursorId = last.nodeId
+      this.activeBranchName = last.branch
+      this.branchHeads.set(last.branch, last.nodeId)
+    }
+    if (records.length > 0) this.touch()
+    return { ok: true, value: { applied: records.length } }
+  }
+
+  list(): TreeNode[] {
+    return clone([...this.nodesById.values()])
+  }
+
+  /**
+   * @returns named branch pointers and their reachable nodes. Branch identity
+   * comes from the session-level head map; node.branch is display metadata only.
+   */
+  branches(): BranchView[] {
+    return [...this.branchHeads].map(([name, headId]) => {
+      const nodeIds: string[] = []
+      let current: string | null = headId
+      while (current !== null) {
+        const node = this.nodesById.get(current)
+        if (node === undefined) break
+        nodeIds.push(current)
+        current = node.parentId
+      }
+      nodeIds.reverse()
+      return { name, headId, nodeIds }
+    })
+  }
+
+  /** Return a compact Pi-style session status projection. */
+  info(): SessionTreeSessionInfo {
+    const usage: Record<string, number> = {}
+    let cost = 0
+    for (const node of this.nodesById.values()) {
+      if (node.usage !== undefined) {
+        for (const [key, value] of Object.entries(node.usage)) {
+          if (typeof value === 'number') usage[key] = (usage[key] ?? 0) + value
+        }
+      }
+      if (typeof node.cost === 'number') cost += node.cost
+    }
+    const tokenCount = Object.entries(usage).reduce((total, [key, value]) => key.endsWith('Tokens') ? total + value : total, 0)
+    return {
+      sessionId: this.sessionId,
+      branchHeads: Object.fromEntries(this.branchHeads),
+      nodeCount: this.nodesById.size,
+      messageCount: [...this.nodesById.values()].filter(node => node.message !== undefined).length,
+      branchCount: this.branches().length,
+      cursor: this.cursorId,
+      activeBranch: this.activeBranchName,
+      selectedNodeId: this.selectedNodeId,
+      currentPathLength: this.currentPath().length,
+      ...(Object.keys(usage).length > 0 ? { usage } : {}),
+      ...(tokenCount !== 0 ? { tokenCount } : {}),
+      ...(cost !== 0 ? { cost } : {}),
+      snapshotVersion: SNAPSHOT_VERSION,
+    }
+  }
+
+  /** @returns the full read view served to the browser panel. */
+  view(): SessionTreeView {
+    return {
+      sessionId: this.sessionId,
+      cursor: this.cursorId,
+      activeBranch: this.activeBranchName,
+      selectedNodeId: this.selectedNodeId,
+      branchHeads: Object.fromEntries(this.branchHeads),
+      nodes: this.list(),
+      branches: this.branches(),
+    }
+  }
+
+  /** @returns a versioned durable snapshot (defensive copy). */
+  snapshot(): SessionTreeSnapshot {
+    return clone({
+      version: SNAPSHOT_VERSION,
+      sessionId: this.sessionId,
+      cursor: this.cursorId,
+      activeBranch: this.activeBranchName,
+      ...(this.syncedSessionEventSeq < 0 ? {} : { nativeEventSeq: this.syncedSessionEventSeq }),
+      branchHeads: Object.fromEntries(this.branchHeads),
+      selectedNodeId: this.selectedNodeId,
+      nodes: [...this.nodesById.values()],
+    })
+  }
+
+  /** Return the current leaf's root-to-leaf node path. */
+  currentPath(from: string | null = this.cursorId): TreeNode[] {
+    const path: TreeNode[] = []
+    let current = from
+    while (current !== null) {
+      const node = this.nodesById.get(current)
+      if (node === undefined) break
+      path.push(clone(node))
+      current = node.parentId
+    }
+    return path.reverse()
+  }
+
+  /** Return the greatest native Session event seq already projected into this tree. */
+  lastSessionEventSeq(): number {
+    return this.syncedSessionEventSeq
+  }
+
+  /** Advance the native Session event watermark after a successful sync/write. */
+  markSessionEventSeq(seq: number): void {
+    if (Number.isSafeInteger(seq) && seq > this.syncedSessionEventSeq) {
+      this.syncedSessionEventSeq = seq
+      this.touch()
+    }
+  }
+
+  /** Rewind the watermark when a persisted native tail is shorter than the sidecar expected. */
+  limitSessionEventSeq(seq: number): void {
+    if (Number.isSafeInteger(seq) && seq < this.syncedSessionEventSeq) {
+      this.syncedSessionEventSeq = seq
+      this.touch()
+    }
+  }
+
+  /** @returns true when a node with this id exists. */
+  has(nodeId: string): boolean {
+    return this.nodesById.has(nodeId)
+  }
+
+  /**
+   * Find the dedicated tool-call node carrying this call id. Assistant
+   * message nodes may echo the same tool-call block in their content, but a
+   * tool result must never fold into them: only `type === 'tool_call'` nodes
+   * represent the interaction entry the panel renders.
+   */
+  findToolCallNode(callId: string): TreeNode | undefined {
+    for (const node of this.nodesById.values()) {
+      if (node.type !== 'tool_call') continue
+      if (node.content?.some(part => part.type === 'tool_call' && part.id === callId) === true) return node
+    }
+    return undefined
+  }
+
+  /**
+   * Replace a projected tool-call node with its result-merged form, so one
+   * call and its result stay one tree entry even when the result arrives in a
+   * later sync batch than the call. The tree is a deterministic projection of
+   * the durable Session log, so this derived update never rewrites history in
+   * the log itself and replays identically from scratch.
+   */
+  attachToolResult(callId: string, merged: TreeNode): TreeResult<TreeNode> {
+    const existing = this.findToolCallNode(callId)
+    if (existing === undefined) return fail('NODE_NOT_FOUND', `no tool-call node for call '${callId}'`)
+    if (merged.nodeId !== existing.nodeId) return fail('INVALID_ARGUMENT', 'merged tool node does not match the stored tool-call node')
+    this.nodesById.set(existing.nodeId, clone(merged))
+    this.touch()
+    return { ok: true, value: clone(merged) }
+  }
+
+  /** @returns direct child ids, used to expose the derived fork count. */
+  private directChildren(parentId: string): string[] {
+    return [...this.nodesById.values()].filter(node => node.parentId === parentId).map(node => node.nodeId)
+  }
+
+  private messagesFrom(from: string | null): LlmMessage[] {
+    const path: LlmMessage[] = []
+    let current = from
+    while (current !== null) {
+      const node = this.nodesById.get(current)
+      if (node === undefined) break
+      if (node.message !== undefined) path.push(clone(node.message))
+      current = node.parentId
+    }
+    return path.reverse()
+  }
+}
+
+/** Keyed store: many independent trees coexist, one per session. */
+export class SessionTreeStore {
+  private readonly trees = new Map<string, SessionTree>()
+
+  /** Look up a tree without creating one. */
+  get(sessionId: SessionId): SessionTree | undefined {
+    return this.trees.get(sessionId)
+  }
+
+  /** Look up a tree, or return the standard SESSION_NOT_FOUND error. */
+  require(sessionId: SessionId): TreeResult<SessionTree> {
+    const tree = this.trees.get(sessionId)
+    return tree === undefined
+      ? fail('SESSION_NOT_FOUND', `session '${sessionId}' was not found`)
+      : { ok: true, value: tree }
+  }
+
+  /** Create a new tree session. Existing ids are never silently reset. */
+  create(sessionId: SessionId): SessionTree {
+    if (this.trees.has(sessionId)) throw new Error(`session '${sessionId}' already exists`)
+    const tree = new SessionTree(sessionId)
+    this.trees.set(sessionId, tree)
+    return tree
+  }
+
+  /** Clone the active branch into an independent session with fresh node ids. */
+  clone(sourceSessionId: SessionId, targetSessionId: SessionId): TreeResult<{ sessionId: string }> {
+    if (this.trees.has(targetSessionId)) return fail('SESSION_ALREADY_EXISTS', `session '${targetSessionId}' already exists`)
+    const source = this.trees.get(sourceSessionId)
+    if (source === undefined) return fail('SESSION_NOT_FOUND', `session '${sourceSessionId}' was not found`)
+    const snapshot = source.snapshot()
+    // Pi `/clone` duplicates the current active branch, not unrelated sibling
+    // alternatives. Walk from the current leaf to the root and retain only
+    // that path before remapping ids for the independent destination tree.
+    const byId = new Map(snapshot.nodes.map(node => [node.nodeId, node]))
+    const activeIds = new Set<string>()
+    let current = snapshot.cursor
+    while (current !== null) {
+      activeIds.add(current)
+      current = byId.get(current)?.parentId ?? null
+    }
+    const activeNodes = snapshot.nodes.filter(node => activeIds.has(node.nodeId))
+    const ids = new Map<string, string>()
+    for (const node of activeNodes) ids.set(node.nodeId, nodeId())
+    const cursor = snapshot.cursor === null ? null : ids.get(snapshot.cursor) ?? null
+    const branchHeads = Object.fromEntries(Object.entries(snapshot.branchHeads ?? {})
+      .map(([name, head]) => [name, ids.get(head)])
+      .filter((entry): entry is [string, string] => entry[1] !== undefined))
+    if (cursor !== null) branchHeads[snapshot.activeBranch] = cursor
+    const cloned: SessionTreeSnapshot = {
+      ...snapshot,
+      sessionId: targetSessionId,
+      cursor,
+      branchHeads,
+      selectedNodeId: snapshot.selectedNodeId == null ? null : ids.get(snapshot.selectedNodeId) ?? null,
+      nodes: activeNodes.map(node => ({
+        ...node,
+        nodeId: ids.get(node.nodeId) ?? nodeId(),
+        parentId: node.parentId === null ? null : ids.get(node.parentId) ?? null,
+      })),
+    }
+    this.trees.set(targetSessionId, new SessionTree(targetSessionId, cloned))
+    return { ok: true, value: { sessionId: targetSessionId } }
+  }
+
+  /** Replace one session's tree from a previously validated candidate. */
+  replace(sessionId: SessionId, tree: SessionTree): void {
+    if (tree.sessionId !== sessionId) throw new Error('tree does not belong to session')
+    this.trees.set(sessionId, tree)
+  }
+
+  /** Forget one session's projection (its sidecar may be rebuilt from the log). */
+  delete(sessionId: SessionId): boolean {
+    return this.trees.delete(sessionId)
+  }
+
+  /** Replace one session's tree from a snapshot. */
+  load(snapshot: SessionTreeSnapshot): TreeResult<{ sessionId: string }> {
+    try {
+      const tree = new SessionTree(snapshot.sessionId as SessionId, snapshot)
+      this.trees.set(tree.sessionId, tree)
+      return { ok: true, value: { sessionId: tree.sessionId } }
+    } catch (error) {
+      return fail('INVALID_SNAPSHOT', error instanceof Error ? error.message : 'invalid snapshot')
+    }
+  }
+
+  /** @returns all session ids with a live tree, in creation order. */
+  list(): string[] {
+    return [...this.trees.keys()]
+  }
+}
+
+/** Validate one carried message (role must be a known role, content a string). */
+function isMessage(value: unknown): value is LlmMessage {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  return typeof record.role === 'string'
+    && ['system', 'user', 'assistant', 'tool'].includes(record.role)
+    && typeof record.content === 'string'
+    && (record.name === undefined || typeof record.name === 'string')
+    && (record.toolCallId === undefined || typeof record.toolCallId === 'string')
+}
+
+/** Validate one restored snapshot: version, ownership, nodes, and cursor. */
+function isSnapshot(value: unknown, sessionId: SessionId): value is SessionTreeSnapshot {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  if (record.version !== SNAPSHOT_VERSION || record.sessionId !== sessionId) return false
+  const nodes = record.nodes
+  if (!Array.isArray(nodes) || nodes.some(node => !isNode(node))) return false
+  if (!hasValidTopology(nodes as TreeNode[])) return false
+  const cursor = record.cursor
+  if (cursor !== null && typeof cursor !== 'string') return false
+  if (typeof cursor === 'string' && !(nodes as TreeNode[]).some(node => node.nodeId === cursor)) return false
+  if (record.selectedNodeId !== undefined && record.selectedNodeId !== null
+    && (typeof record.selectedNodeId !== 'string' || !(nodes as TreeNode[]).some(node => node.nodeId === record.selectedNodeId))) return false
+  if (record.nativeEventSeq !== undefined && (typeof record.nativeEventSeq !== 'number' || !Number.isSafeInteger(record.nativeEventSeq) || record.nativeEventSeq < 0)) return false
+  if (record.branchHeads !== undefined && !isJsonRecord(record.branchHeads)) return false
+  if (record.branchHeads !== undefined && Object.entries(record.branchHeads).some(([name, head]) => name.length === 0 || typeof head !== 'string' || !(nodes as TreeNode[]).some(node => node.nodeId === head))) return false
+  if (typeof record.activeBranch !== 'string' || record.activeBranch.length === 0) return false
+  if (record.branchHeads !== undefined && record.branchHeads[record.activeBranch] === undefined && cursor !== null) return false
+  return true
+}
+
+/** Validate one restored node before it enters the tree. */
+function isNode(value: unknown): value is TreeNode {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  if (typeof record.nodeId !== 'string' || record.nodeId.length === 0
+    || (record.parentId !== null && typeof record.parentId !== 'string')
+    || typeof record.branch !== 'string' || record.branch.length === 0
+    || typeof record.summary !== 'string'
+    || typeof record.createdAt !== 'string') return false
+  if (record.type !== undefined && !['message', 'tool_call', 'tool_result', 'model_change', 'compaction', 'branch_summary', 'custom'].includes(record.type as string)) return false
+  if (record.forkCount !== undefined && (typeof record.forkCount !== 'number' || !Number.isInteger(record.forkCount) || record.forkCount < 0)) return false
+  if (record.message !== undefined && !isMessage(record.message)) return false
+  if (record.content !== undefined && (!Array.isArray(record.content) || record.content.some(part => !isContentPart(part)))) return false
+  if (record.model !== undefined && typeof record.model !== 'string') return false
+  if (record.cost !== undefined && (typeof record.cost !== 'number' || !Number.isFinite(record.cost))) return false
+  if (record.usage !== undefined && !isJsonRecord(record.usage)) return false
+  if (record.metadata !== undefined && !isJsonRecord(record.metadata)) return false
+  return record.error === undefined || typeof record.error === 'string'
+}
+
+function isContentPart(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const record = value as Record<string, unknown>
+  if (record.type === 'text' || record.type === 'reasoning') return typeof record.text === 'string'
+  if (record.type === 'image') return (record.attachmentId === undefined || typeof record.attachmentId === 'string')
+    && (record.mediaType === undefined || typeof record.mediaType === 'string')
+  if (record.type === 'tool_call') return typeof record.id === 'string' && typeof record.name === 'string' && isJsonValue(record.arguments)
+  if (record.type === 'tool_result') return typeof record.toolCallId === 'string' && typeof record.content === 'string' && (record.isError === undefined || typeof record.isError === 'boolean')
+  return false
+}
+
+function isJsonRecord(value: unknown): value is Record<string, JsonValue> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && isJsonValue(value)
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (Array.isArray(value)) return value.every(isJsonValue)
+  if (typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value)
+    return (prototype === Object.prototype || prototype === null)
+      && Object.values(value).every(isJsonValue)
+  }
+  return false
+}
+
+/**
+ * Validate the restored parent graph: every non-root `parentId` resolves to a
+ * node in the set, and no ancestor chain cycles. A chain longer than the node
+ * count necessarily revisits a node, which marks a cycle.
+ */
+function hasValidTopology(nodes: readonly TreeNode[]): boolean {
+  const ids = new Set(nodes.map(node => node.nodeId))
+  if (ids.size !== nodes.length) return false // duplicate nodeId
+  const parentOf = new Map(nodes.map(node => [node.nodeId, node.parentId]))
+  for (const node of nodes) {
+    if (node.parentId !== null && !ids.has(node.parentId)) return false
+  }
+  for (const node of nodes) {
+    let steps = 0
+    let current: string | null = node.nodeId
+    while (current !== null) {
+      if (steps > nodes.length) return false
+      current = parentOf.get(current) ?? null
+      steps += 1
+    }
+  }
+  return true
+}
+
+/**
+ * One-time upgrade of legacy snapshots: earlier projections stored one
+ * `tool/call` and its `tool/result` as two adjacent nodes. Fold each result
+ * into its tool-call parent (identical rules to the current event projection)
+ * so existing trees read the pair as a single interaction after restore.
+ * Idempotent: snapshots already written by the merged projection contain no
+ * foldable pairs and come back unchanged.
+ */
+function foldLegacyToolResultPairs(snapshot: SessionTreeSnapshot): SessionTreeSnapshot {
+  const byId = new Map(snapshot.nodes.map(node => [node.nodeId, node]))
+  const mergedByParent = new Map<string, TreeNode>()
+  const removedToParent = new Map<string, string>()
+  for (const node of snapshot.nodes) {
+    if (node.type !== 'tool_result' || node.parentId === null) continue
+    const parent = byId.get(node.parentId)
+    if (parent === undefined || parent.type !== 'tool_call' || mergedByParent.has(parent.nodeId)) continue
+    const resultPart = node.content?.find(part => part.type === 'tool_result')
+    if (resultPart === undefined) continue
+    const matchesCall = parent.content?.some(part => part.type === 'tool_call' && part.id === resultPart.toolCallId) === true
+    if (!matchesCall) continue
+    const resultSeq = typeof node.metadata?.sessionEventSeq === 'number' ? node.metadata.sessionEventSeq : undefined
+    mergedByParent.set(parent.nodeId, attachToolResult(parent, {
+      callId: resultPart.toolCallId,
+      text: resultPart.content,
+      isError: resultPart.isError === true || node.error !== undefined,
+      ...(node.error === undefined ? {} : { error: node.error }),
+    }, resultSeq))
+    removedToParent.set(node.nodeId, parent.nodeId)
+  }
+  if (mergedByParent.size === 0) return snapshot
+  const reparent = (id: string | null): string | null => (id === null ? null : removedToParent.get(id) ?? id)
+  const nodes = snapshot.nodes
+    .filter(node => !removedToParent.has(node.nodeId))
+    .map(node => {
+      const merged = mergedByParent.get(node.nodeId)
+      return merged === undefined ? { ...node, parentId: reparent(node.parentId) } : { ...merged, parentId: reparent(merged.parentId) }
+    })
+  const selectedNodeId = snapshot.selectedNodeId === undefined ? undefined : reparent(snapshot.selectedNodeId)
+  return {
+    ...snapshot,
+    cursor: reparent(snapshot.cursor),
+    // exactOptionalPropertyTypes: keep the key absent rather than explicit undefined
+    ...(selectedNodeId === undefined ? {} : { selectedNodeId }),
+    ...(snapshot.branchHeads === undefined
+      ? {}
+      : { branchHeads: Object.fromEntries(Object.entries(snapshot.branchHeads).map(([name, head]) => [name, reparent(head) ?? head])) }),
+    nodes,
+  }
+}
+
+/** Human-readable preview for a node without an explicit summary. */
+function summarize(content: string): string {
+  const flat = content.replace(/\s+/gu, ' ').trim()
+  return flat.length <= 300 ? flat : `${flat.slice(0, 297)}...`
+}
+
+export type { BranchView, ContentPart, JumpView, LlmMessage, SessionTreeLogEntry, SessionTreeSessionInfo, SessionTreeSnapshot, SessionTreeView, TreeEntryType, TreeNode, TreeResult }
+
+/**
+ * Process-wide store shared by the domain service and the tool/command
+ * companion, so model appends and browser jumps read the same trees.
+ */
+export const sessionTreeStore = new SessionTreeStore()

@@ -1,0 +1,11 @@
+node_modules/
+node_modules
+**/lib/
+!/lib/
+!/lib/**
+*.tsbuildinfo
+.DS_Store
+*.tgz
+.bundle-build/
+coverage/
+.pnpm-store/
