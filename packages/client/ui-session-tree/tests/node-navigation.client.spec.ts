@@ -140,11 +140,13 @@ describe('verified landing', () => {
       if (reverted) return
       reverted = true
       // Native `reading.restore()` runs after the first rail click.
+      // Deterministic restore: run before the 200ms settle window can accept
+      // the first landing, otherwise faster runners accept it before this timer.
       window.setTimeout(() => {
         for (const mark of fixture.marks) mark.removeAttribute('aria-current')
         fixture.marks[0]!.setAttribute('aria-current', 'true')
         fixture.root.querySelector<HTMLElement>('.scroller')!.scrollTop = 50
-      }, 300)
+      }, 0)
     }
     await navigateNativeTurn({ turn: 5, getRoot: () => fixture.root, verify: true, timeoutMs: 3000, settleMs: 200, retryMs: 500 })
     expect(fixture.clicked.filter(turn => turn === 5).length).toBeGreaterThanOrEqual(2)

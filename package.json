@@ -63,5 +63,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lizhuoyuan41-droid/dsh-session-tree-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lizhuoyuan41-droid/dsh-session-tree-extension/issues"
   }
 }
