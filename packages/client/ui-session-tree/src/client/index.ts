@@ -33,7 +33,7 @@ import {
 } from './SessionTreeOverlay.tsx'
 import { en, zh, type SessionTreeKey } from './locales.ts'
 import { nativeTurnForSeq, navigateNativeTurn, waitForVisiblePage } from './node-navigation.ts'
-import { currentSessionId } from './session-list.ts'
+import { archiveCascadeTargets, currentSessionId } from './session-list.ts'
 
 export { SessionTreePanel, SessionTreeDock } from './SessionTreePanel.tsx'
 export { SessionTreeOverlay, SessionTreeOverlayController } from './SessionTreeOverlay.tsx'
@@ -320,6 +320,34 @@ function registerSessionTreeUi(ctx: ClientContext): void {
   const archivedSource = workspaceList === undefined ? undefined : {
     subscribe: (listener: () => void) => workspaceList.subscribe(listener),
     getSnapshot: () => workspaceList.getSnapshot().archivedSessionIds,
+  }
+
+  // Archiving a Session archives its whole session subtree. The native archive
+  // action only touches one id, so watch newly archived ids and cascade the
+  // descendants through the same workspace service. Existing archived ids are
+  // seeded as already handled, so a restart never archives unrelated history.
+  const workspaceService = ctx.get('workspaces')
+  if (workspaceList !== undefined && workspaceService !== undefined) {
+    ctx.effect(() => {
+      let previous = new Set<SessionId>(workspaceList.getSnapshot().archivedSessionIds as readonly SessionId[])
+      const pending = new Set<SessionId>()
+      const unsubscribe = workspaceList.subscribe(() => {
+        const current = new Set<SessionId>(workspaceList.getSnapshot().archivedSessionIds as readonly SessionId[])
+        const listState = ctx.sessions.list.getSnapshot()
+        const targets = new Set(
+          archiveCascadeTargets(previous, current, listState).filter(id => !pending.has(id)),
+        )
+        previous = current
+        if (targets.size === 0) return
+        for (const id of targets) pending.add(id)
+        void Promise.allSettled(
+          [...targets].map(id => workspaceService.archiveSession(id)),
+        ).finally(() => {
+          for (const id of targets) pending.delete(id)
+        })
+      })
+      return unsubscribe
+    })
   }
 
   const activateTurn = (turn: number): Promise<void> =>
