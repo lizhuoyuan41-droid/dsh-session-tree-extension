@@ -10,8 +10,8 @@ Append-only, multi-branch conversation trees for
 historical node, clone a branch into a new session, and browse the whole
 lineage as one merged WebUI graph. Old history is never edited or deleted.
 
-This is the **v0.1.1 release** of this repository, the first registry release
-under the independent `@ryanlee2007` npm scope. It is based on the upstream
+This is the **v0.1.2 release** of this repository. The 0.1.1 line was the first
+registry release under the independent `@ryanlee2007` npm scope. It is based on the upstream
 [robiteame/dsh-session-tree-extension](https://github.com/robiteame/dsh-session-tree-extension)
 project; the original copyright notice and the full MIT license text are
 retained in [LICENSE](./LICENSE).
@@ -101,7 +101,7 @@ dsh plugin --profile <profile> add @ryanlee2007/dsh-session-tree
 Prebuilt tarballs install the same way and need no build scripts:
 
 ```sh
-dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.1.tgz
+dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.2.tgz
 ```
 
 After installing, restart the profile. Verify the composed layer:
