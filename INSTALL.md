@@ -27,7 +27,7 @@ or, fully offline, with the prebuilt tarball (no install scripts, no build
 step):
 
 ```sh
-dsh plugin --profile <profile> add robiteame-dsh-session-tree-0.1.1.tgz
+dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.1.tgz
 ```
 
 The carrier package pulls its three implementation packages

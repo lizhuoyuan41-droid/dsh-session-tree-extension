@@ -64,7 +64,7 @@ after their immediate parent Session:
 
 ![Archived nested branches](./docs/screenshots/archived-branches.png)
 
-Distributed as four npm-format packages under the `@robiteame` scope:
+Distributed as four npm-format packages under the `@ryanlee2007` scope:
 
 | Package | Role |
 |---|---|
@@ -100,7 +100,7 @@ dsh plugin --profile <profile> add @ryanlee2007/dsh-session-tree
 Prebuilt tarballs install the same way and need no build scripts:
 
 ```sh
-dsh plugin --profile <profile> add robiteame-dsh-session-tree-0.1.1.tgz
+dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.1.tgz
 ```
 
 After installing, restart the profile. Verify the composed layer:

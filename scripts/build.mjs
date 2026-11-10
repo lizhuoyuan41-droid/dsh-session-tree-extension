@@ -115,7 +115,7 @@ const cssPlugin = {
 const remoteStubPlugin = {
   name: 'dsh-session-tree-remote-stub',
   setup(pluginBuild) {
-    pluginBuild.onResolve({ filter: /^@robiteame\/dsh-pi-agent-session-tree\/remote$/ }, args => ({
+    pluginBuild.onResolve({ filter: /^@ryanlee2007\/dsh-pi-agent-session-tree\/remote$/ }, args => ({
       path: resolve(PI, 'src/typert.remote-client.template.js'),
     }))
   },

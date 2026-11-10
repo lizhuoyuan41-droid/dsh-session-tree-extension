@@ -29,7 +29,7 @@ harness_patch_is_applied() {
     [ "$(count_marker packages/bundle/base/package.json '"@ryanlee2007/dsh-pi-agent-session-tree": "workspace:*",')" = "1" ] &&
     [ "$(count_marker packages/bundle/web-app/cordis.patch.yml '# Pi-style session tree in the official right Sidebar.')" = "1" ] &&
     [ "$(count_marker packages/bundle/web-app/package.json '"@ryanlee2007/dsh-client-ui-session-tree": "workspace:*",')" = "1" ] &&
-    [ "$(count_marker pnpm-workspace.yaml '# Source-integrated @robiteame packages resolve their semver peer/dependency')" = "1" ] &&
+    [ "$(count_marker pnpm-workspace.yaml '# Source-integrated @ryanlee2007 packages resolve their semver peer/dependency')" = "1" ] &&
     [ "$(count_marker tsconfig.base.json '"@ryanlee2007/dsh-pi-agent-session-tree/client":')" = "1" ] &&
     [ "$(count_marker tsconfig.client.json '{ "path": "./packages/client/ui-session-tree" },')" = "1" ] &&
     [ "$(count_marker tsconfig.host.json '{ "path": "./packages/extensions/pi-agent-session-tree" },')" = "1" ]
