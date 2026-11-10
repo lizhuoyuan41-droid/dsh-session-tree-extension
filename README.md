@@ -10,7 +10,8 @@ Append-only, multi-branch conversation trees for
 historical node, clone a branch into a new session, and browse the whole
 lineage as one merged WebUI graph. Old history is never edited or deleted.
 
-This is the **v0.1.1 release** of this repository. It is based on the upstream
+This is the **v0.1.1 release** of this repository, the first registry release
+under the independent `@ryanlee2007` npm scope. It is based on the upstream
 [robiteame/dsh-session-tree-extension](https://github.com/robiteame/dsh-session-tree-extension)
 project; the original copyright notice and the full MIT license text are
 retained in [LICENSE](./LICENSE).
@@ -23,7 +24,7 @@ Three commands:
 | `/fork` | Branch from any historical node — the fork appears in the graph and as an inline menu under its source session |
 | `/clone` | Duplicate the current conversation into an independent new session under the same project |
 
-## v0.1.0 highlights
+## Highlights
 
 - **Subtree focus**: click the target icon on any fork point to show only that
   node and its descendants. The focused node pins to the top, the view is
