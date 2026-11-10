@@ -2,7 +2,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentType } from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionTreeView, TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
 import { zh } from '../src/client/locales.ts'
@@ -1596,12 +1596,15 @@ describe('right-sidebar merged Session graph', () => {
     await screen.findByText('grandchild node')
     // The shared fork anchor keeps its descendants (trunk included), so focus
     // no longer lives there; the row that starts the branch owns the action.
+    const focusButtonName = new RegExp(zh['panel.focus'])
     const anchorRow = graphRow(`${sid('s1')}:session-event-2`)!
-    expect(anchorRow.querySelector('button[class*="focusAction"]')).toBeNull()
+    expect(within(anchorRow).queryByRole('button', { name: focusButtonName })).toBeNull()
+    // Clone branches carry the same focus entry as fork branches.
+    const cloneRow = graphRow(`${sid('c2')}:session-event-3`)!
+    expect(within(cloneRow).getByRole('button', { name: focusButtonName })).toBeTruthy()
     const forkKey = `${sid('c1')}:session-event-3`
     const forkRow = graphRow(forkKey)!
-    const focusButton = forkRow.querySelector<HTMLButtonElement>('button[class*="focusAction"]')
-    expect(focusButton).not.toBeNull()
+    const focusButton = within(forkRow).getByRole<HTMLButtonElement>('button', { name: focusButtonName })
     const scroller = document.querySelector<HTMLElement>('[data-session-tree-panel] [class*="body"]')!
     scroller.scrollTop = 420
     fireEvent.click(focusButton!)
@@ -1631,8 +1634,9 @@ describe('right-sidebar merged Session graph', () => {
     renderWorktreePanel(fixture, { sessionId: sid('g1') })
     await screen.findByText('grandchild node')
     const leafRow = graphRow(`${sid('g1')}:session-event-4`)!
-    const focusButton = leafRow.querySelector<HTMLButtonElement>('button[class*="focusAction"]')
-    expect(focusButton).not.toBeNull()
+    const focusButton = within(leafRow).getByRole<HTMLButtonElement>('button', {
+      name: new RegExp(zh['panel.focus']),
+    })
     fireEvent.click(focusButton!)
     expect(graphRows().map(row => row.getAttribute('data-session-tree-row'))).toEqual([
       `${sid('g1')}:session-event-4`,
@@ -1645,7 +1649,9 @@ describe('right-sidebar merged Session graph', () => {
     const first = renderWorktreePanel(fixture, { sessionId: sid('g1') })
     await screen.findByText('grandchild node')
     const forkRow = graphRow(`${sid('c1')}:session-event-3`)!
-    fireEvent.click(forkRow.querySelector<HTMLButtonElement>('button[class*="focusAction"]')!)
+    fireEvent.click(within(forkRow).getByRole<HTMLButtonElement>('button', {
+      name: new RegExp(zh['panel.focus']),
+    }))
     expect(screen.getByRole('button', { name: zh['panel.focusAll'] })).toBeTruthy()
     first.unmount()
 
