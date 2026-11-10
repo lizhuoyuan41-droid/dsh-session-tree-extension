@@ -26,10 +26,11 @@ Three commands:
 
 ## Highlights
 
-- **Subtree focus**: click the target icon on any fork point to show only that
-  node and its descendants. The focused node pins to the top, the view is
+- **Branch focus**: click the target icon on the row that starts a fork or
+  clone branch (the row carrying the `分叉` / `克隆` badge) to show only that
+  branch and its nested forks. The branch row pins to the top, the view is
   remembered across Session switches/sidebar remounts, and navigating inside
-  the subtree keeps the focus. `全部` / Esc returns to the whole lineage.
+  the focused branch keeps the focus. `全部` / Esc returns to the whole lineage.
 - **Readable branch names**: a fork is named from its first own prompt, then
   follows later dynamic titles; an empty fork falls back to
   `parent · fork N`.
@@ -51,10 +52,10 @@ The inline `/fork` branch menu beneath its source session:
 
 ![Inline fork branch menu](./docs/screenshots/fork-branches-menu.png)
 
-Subtree focus with the `全部 / node` breadcrumb and the focused node pinned to
-the top:
+Branch focus with the `全部 / branch` breadcrumb and the focused branch row
+pinned to the top:
 
-![Subtree focus](./docs/screenshots/focus-view.png)
+![Branch focus](./docs/screenshots/focus-view.png)
 
 A fork of a fork sits at `parent lane + 1` instead of jumping inward:
 
@@ -126,7 +127,7 @@ shown as connected nodes. Shared copied prefixes are deduplicated, fork points
 carry session badges, and the current session's path stays highlighted. Click
 a node to bind it; clicking a node owned by another session opens that session
 first. Collapse individual subtrees or whole session branches; use the focus target
-to isolate one fork point.
+on a branch row to isolate that branch.
 
 ### `/fork` — branch from any historical node
 

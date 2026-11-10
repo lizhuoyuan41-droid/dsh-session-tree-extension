@@ -1177,7 +1177,12 @@ function MergedSessionTreePanel({
             selectorMode={false}
             pending={pending}
             showFork={row.placeholder === undefined && forkTargetOf(row) !== undefined}
-            showFocus={focusKey === null && row.placeholder === undefined && row.branchOutLanes.length > 0}
+            // Focus belongs to the branch-start row (the row carrying a fork or
+            // clone badge), not the shared fork anchor. Focusing the anchor kept
+            // the trunk continuation, so a fork point on the main line appeared
+            // unfiltered; the branch row isolates exactly that branch subtree.
+            showFocus={focusKey === null && row.placeholder === undefined
+              && row.badges.some(badge => badge.kind !== 'main')}
             branchCollapsed={branchCollapsed}
             onToggleNode={toggleNode}
             onToggleBranch={toggleBranch}

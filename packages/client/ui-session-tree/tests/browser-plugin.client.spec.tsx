@@ -1590,11 +1590,15 @@ describe('right-sidebar merged Session graph', () => {
     )).toBe(true)
   })
 
-  it('focuses one fork point to its subtree and exits with Escape', async () => {
+  it('focuses a branch row to its branch subtree and exits with Escape', async () => {
     const fixture = worktreeFixture()
     const rendered = renderWorktreePanel(fixture)
     await screen.findByText('grandchild node')
-    const forkKey = `${sid('s1')}:session-event-2`
+    // The shared fork anchor keeps its descendants (trunk included), so focus
+    // no longer lives there; the row that starts the branch owns the action.
+    const anchorRow = graphRow(`${sid('s1')}:session-event-2`)!
+    expect(anchorRow.querySelector('button[class*="focusAction"]')).toBeNull()
+    const forkKey = `${sid('c1')}:session-event-3`
     const forkRow = graphRow(forkKey)!
     const focusButton = forkRow.querySelector<HTMLButtonElement>('button[class*="focusAction"]')
     expect(focusButton).not.toBeNull()
@@ -1604,12 +1608,10 @@ describe('right-sidebar merged Session graph', () => {
     // The old scroll offset must not leave the new root above the viewport.
     expect(scroller.scrollTop).toBe(0)
 
-    // The focused node becomes the trunk; ancestors and sibling Sessions that
-    // do not descend from it disappear, while every child branch remains.
+    // The focused branch becomes the trunk; the main line and sibling branches
+    // disappear, while nested forks inside this branch remain.
     expect(graphRows().map(row => row.getAttribute('data-session-tree-row'))).toEqual([
       forkKey,
-      `${sid('c1')}:session-event-3`,
-      `${sid('c2')}:session-event-3`,
       `${sid('g1')}:session-event-4`,
     ])
     expect(screen.getByRole('button', { name: zh['panel.focusAll'] })).toBeTruthy()
@@ -1624,20 +1626,34 @@ describe('right-sidebar merged Session graph', () => {
     await waitFor(() => { expect(graphRows()).toHaveLength(5) })
   })
 
-  it('restores the focused view after the sidebar remounts', async () => {
+  it('focuses a leaf branch instead of dropping its own rows', async () => {
     const fixture = worktreeFixture()
-    const first = renderWorktreePanel(fixture)
+    renderWorktreePanel(fixture, { sessionId: sid('g1') })
     await screen.findByText('grandchild node')
-    const forkRow = graphRow(`${sid('s1')}:session-event-2`)!
+    const leafRow = graphRow(`${sid('g1')}:session-event-4`)!
+    const focusButton = leafRow.querySelector<HTMLButtonElement>('button[class*="focusAction"]')
+    expect(focusButton).not.toBeNull()
+    fireEvent.click(focusButton!)
+    expect(graphRows().map(row => row.getAttribute('data-session-tree-row'))).toEqual([
+      `${sid('g1')}:session-event-4`,
+    ])
+    expect(screen.getByRole('button', { name: zh['panel.focusAll'] })).toBeTruthy()
+  })
+
+  it('restores the focused branch after the sidebar remounts', async () => {
+    const fixture = worktreeFixture()
+    const first = renderWorktreePanel(fixture, { sessionId: sid('g1') })
+    await screen.findByText('grandchild node')
+    const forkRow = graphRow(`${sid('c1')}:session-event-3`)!
     fireEvent.click(forkRow.querySelector<HTMLButtonElement>('button[class*="focusAction"]')!)
     expect(screen.getByRole('button', { name: zh['panel.focusAll'] })).toBeTruthy()
     first.unmount()
 
     // Opening the sidebar in the branch Session must restore the remembered
-    // subtree instead of falling back to the whole tree.
+    // branch instead of falling back to the whole tree.
     renderWorktreePanel(fixture, { sessionId: sid('g1') })
     expect(await screen.findByRole('button', { name: zh['panel.focusAll'] })).toBeTruthy()
-    expect(graphRows()).toHaveLength(4)
+    expect(graphRows()).toHaveLength(2)
   })
 
   it('dedupes a fork prefix even when the parent cursor sits on an older node', () => {

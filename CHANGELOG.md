@@ -1,3 +1,15 @@
+## Unreleased
+
+### Fixed
+
+- The focus action now lives on the row that starts a fork or clone branch
+  (the row carrying the `分叉` / `克隆` badge) instead of the shared fork
+  anchor. Focusing the anchor kept the whole trunk continuation, so a fork
+  point on the main line appeared unfiltered (for example 90 of 91 rows). A
+  branch row isolates exactly that branch and its nested forks, works for leaf
+  branches, and keeps the remembered-focus behaviour. The label is now
+  “Focus this branch” / “聚焦此分支”.
+
 ## 0.1.2 — 2026-11-10
 
 ### Fixed
