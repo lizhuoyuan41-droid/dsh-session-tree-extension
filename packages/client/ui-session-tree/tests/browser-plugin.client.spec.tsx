@@ -1280,6 +1280,49 @@ describe('session tree browser plugin', () => {
     await waitFor(() => { expect(label()).toBe('Later dynamic title') })
   })
 
+  it('keeps a collapsed menu collapsed when another fork is created elsewhere', async () => {
+    const source = sid('s1')
+    const other = sid('s2')
+    const child = sid('c1')
+    const newChild = sid('c2')
+    const lineage = new SessionForkLineage()
+    lineage.record({ childId: child, parentId: source, summary: 'first fork' })
+    let state = fakeListState([source, child, other], Object.fromEntries([
+      fakeRow(source, 'Source chat'),
+      fakeRow(child, 'child one', source),
+      fakeRow(other, 'Other chat'),
+    ]), source)
+    const useSessions = (<T,>(select: (value: typeof state) => T): T => select(state))
+    renderNativeSessionRows([
+      { id: source, title: 'Source chat' },
+      { id: child, title: 'child one' },
+      { id: other, title: 'Other chat' },
+    ])
+    const Menu = SessionBranchList as unknown as ComponentType<Record<string, unknown>>
+    const view = render(<Menu lineage={lineage} openSession={vi.fn()} useSessions={useSessions} t={t} />)
+    await waitFor(() => {
+      expect(document.querySelector(`[data-session-tree-branch-menu="${source}"]`)).not.toBeNull()
+    })
+    fireEvent.click(screen.getByLabelText(`${zh['branch.menu.collapse']} - Source chat`))
+    const body = (): HTMLElement | null =>
+      document.querySelector<HTMLElement>(`[data-session-tree-branch-menu="${source}"] [data-session-tree-branch-body]`)
+    expect(body()?.getAttribute('data-expanded')).toBe('false')
+
+    // A new fork under a different source must not reset other menus.
+    act(() => { lineage.record({ childId: newChild, parentId: other, summary: 'new fork' }) })
+    state = fakeListState([source, child, other, newChild], Object.fromEntries([
+      fakeRow(source, 'Source chat'),
+      fakeRow(child, 'child one', source),
+      fakeRow(other, 'Other chat'),
+      fakeRow(newChild, 'child two', other),
+    ]), source)
+    view.rerender(<Menu lineage={lineage} openSession={vi.fn()} useSessions={useSessions} t={t} />)
+    await waitFor(() => {
+      expect(document.querySelector(`[data-session-tree-branch-menu="${other}"]`)).not.toBeNull()
+    })
+    expect(body()?.getAttribute('data-expanded')).toBe('false')
+  })
+
   it('rebuilds the inline menu when the native session list mutates', async () => {
     const childId = sid('observer-child')
     const lineage = new SessionForkLineage()

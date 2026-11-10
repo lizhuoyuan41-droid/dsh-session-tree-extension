@@ -650,12 +650,6 @@ export function SessionBranchList({
     [state, recordedEntries, topics, t],
   )
 
-  const previousSize = useRef(entries.size)
-  useEffect(() => {
-    if (entries.size > previousSize.current) setCollapsed(new Set())
-    previousSize.current = entries.size
-  }, [entries.size])
-
   const restoreHiddenRows = (): void => {
     for (const [row, hidden] of hiddenRows.current) {
       if (row.isConnected) {
