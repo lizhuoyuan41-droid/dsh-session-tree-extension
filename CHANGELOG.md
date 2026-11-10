@@ -89,7 +89,7 @@ the original copyright notice and full MIT license text are retained in
   plugin manager in an isolated profile. The bundle activates and composes
   all three rows; the WebUI boots and `/tree` opens the native right-Sidebar
   tab without browser warnings or errors. No model API request was needed.
-  [Smoke screenshot](./gui-test-screenshots/harness-rc5-session-tree.png).
+  Smoke screenshot archived in the upstream v0.7.2 release notes.
 
 ## 0.7.1 — 2026-10-25
 
