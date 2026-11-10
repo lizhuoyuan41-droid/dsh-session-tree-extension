@@ -1,3 +1,13 @@
+## Unreleased
+
+### Fixed
+
+- Collapsed inline fork menus no longer reset to expanded when a new fork is
+  created in another Session. Collapse state is now kept per source Session.
+- Archiving a parent Session now archives every unarchived descendant through
+  the native workspace service. Cascading only reacts to newly archived ids,
+  so a restart does not archive unrelated history.
+
 ## 0.1.1 — 2026-11-09
 
 ### Changed
