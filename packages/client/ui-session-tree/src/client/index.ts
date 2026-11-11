@@ -32,6 +32,7 @@ import {
   type SessionTreeRemoteActions,
 } from './SessionTreeOverlay.tsx'
 import { en, zh, type SessionTreeKey } from './locales.ts'
+import { forkNodeForTurn, installChatForkBridge } from './chat-fork.ts'
 import { nativeTurnForSeq, navigateNativeTurn, waitForVisiblePage } from './node-navigation.ts'
 import { archiveCascadeTargets, currentSessionId } from './session-list.ts'
 
@@ -312,6 +313,26 @@ function registerSessionTreeUi(ctx: ClientContext): void {
       set.add(callback); refreshers.set(sessionId, set)
       return () => { set.delete(callback); if (set.size === 0) refreshers.delete(sessionId) }
     },
+  }
+
+  // Route the native completed-turn footer through the same fork action as
+  // the tree panel. No override hook exists on the 0.2.2 footer itself.
+  if (typeof document !== 'undefined' && typeof ctx.locale.bind === 'function') {
+    const chatText = ctx.locale.bind('chat')
+    ctx.effect(() => installChatForkBridge(document, () => chatText('message.branch'), async (sessionId, turn) => {
+      await ctx.sessions.using(sessionId, { source: 'controllerOperation' }, async reference => {
+        await reference.ready
+        const binding = ctx.sessions.binding(sessionId)
+        if (binding === undefined) throw new Error('源会话尚未就绪')
+        // Native history supplies turn boundaries even for pre-turn-metadata
+        // sidecars. Loading to the start also covers paginated older turns.
+        await binding.session.loadThrough(SessionSeq(0))
+        const view = await remoteActions.load(sessionId)
+        const node = forkNodeForTurn(view, binding.eventSource.getSnapshot().entries, turn)
+        const result = await remoteActions.fork(sessionId, node.nodeId, `fork-${Date.now().toString(36)}`)
+        await completeFork(result)
+      })
+    }), 'ui-session-tree: chat footer fork')
   }
 
   // Archive membership as a small store shaped for the panel; the workspace

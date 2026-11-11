@@ -91,7 +91,7 @@ function installTestSlots(ctx: Context) {
   return slots
 }
 
-async function bench(tree = view(null, []), nativePanel = true) {
+async function bench(tree = view(null, []), nativePanel = true, chatFooter = false) {
   const ctx = new Context()
   // Each bench mounts the real browser persistence; scrub the shared jsdom
   // localStorage so one test's /fork annotations never leak into the next.
@@ -142,11 +142,20 @@ async function bench(tree = view(null, []), nativePanel = true) {
   slots.register({ name: 'root', children } as never, (() => null) as never)
   const toolDetails = (() => null) as never
   slots.register({ name: 'details' } as never, toolDetails)
-  ctx.provide('locale', { register: () => () => {} } as never)
+  ctx.provide('locale', {
+    register: () => () => {},
+    ...(chatFooter ? { bind: (namespace: string) => (key: string) => namespace === 'chat' ? '在新对话中分支' : t(key) } : {}),
+  } as never)
   ctx.provide('sessions', {
     binding: (id: SessionId) => bindings.get(id),
     fork: nativeFork,
     refresh,
+    ...(chatFooter ? {
+      using: async (id: SessionId, _options: unknown, action: (reference: { ready: Promise<void> }) => Promise<unknown>) => {
+        if (!bindings.has(id)) throw new Error('missing binding')
+        return action({ ready: Promise.resolve() })
+      },
+    } : {}),
   } as never)
   ctx.provide('uiWorkspace', { openSession: open } as never)
   if (nativePanel) {
@@ -235,6 +244,47 @@ function renderNativeSessionRows(
 }
 
 describe('session tree browser plugin', () => {
+  it('routes the native footer through remote tree fork, lineage and composer completion', async () => {
+    const prompt: TreeNode = { ...node('typed-prompt', null, 'editable prompt'), metadata: { sessionEventSeq: 12 } }
+    const end: TreeNode = { ...node('end', prompt.nodeId, 'turn/end'), message: undefined,
+      metadata: { turn: 2, sessionEventType: 'turn/end' } }
+    const b = await bench(view('end', [prompt, end], 'end'), true, true)
+    try {
+      const childContext = {}
+      const childEditor: TestEditor = {
+        parseEditorState: vi.fn((value: unknown) => value),
+        setEditorState: vi.fn(),
+      }
+      b.bindings.set(sid('s1'), {
+        session: { loadThrough: vi.fn(async () => {}) },
+        eventSource: { getSnapshot: () => ({ entries: [
+          { type: 'event', event: { type: 'turn/start', seq: 10, data: { turn: 2 } } },
+          { type: 'event', event: { type: 'turn/end', seq: 20 } },
+        ] }) },
+      })
+      b.bindings.set(sid('s1-fork-test'), { ctx: childContext })
+      b.editors.set(childContext, childEditor)
+      await b.fiber.await()
+      const host = document.createElement('div')
+      host.dataset.conversationSession = 's1'
+      host.innerHTML = '<div data-turn-tail="2"><div data-clock="end"><button aria-label="在新对话中分支">Fork</button></div></div>'
+      document.body.append(host)
+      const native = vi.fn()
+      host.querySelector('button')!.addEventListener('click', native)
+      fireEvent.click(host.querySelector('button')!)
+      await waitFor(() => expect(b.openedSessions).toContain('s1-fork-test'))
+      expect(b.calls.find(call => call.method === 'fork')?.args).toEqual(['s1', 'typed-prompt', expect.stringMatching(/^fork-/u)])
+      expect(b.nativeFork).not.toHaveBeenCalled()
+      expect(native).not.toHaveBeenCalled()
+      const lineage = ((b.branchEntry()?.inject) as unknown as () => { lineage: SessionForkLineage })().lineage
+      expect(lineage.getSnapshot().get(sid('s1-fork-test'))?.parentId).toBe('s1')
+      expect(b.refresh).toHaveBeenCalled()
+      expect(textFromEditorState(vi.mocked(childEditor.setEditorState).mock.calls[0]?.[0])).toBe('test')
+      host.remove()
+    } finally {
+      await b.fiber.dispose()
+    }
+  })
   it('uses the 0.2 native right-Sidebar tab without replacing Tool details', async () => {
     const b = await bench()
     await b.fiber.await()

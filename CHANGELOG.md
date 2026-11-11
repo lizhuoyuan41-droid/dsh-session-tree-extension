@@ -2,6 +2,12 @@
 
 ### Fixed
 
+- The chat's completed-turn “Branch into a new conversation” button now uses
+  the session-tree fork flow, including lineage registration and an editable
+  child prompt. The clicked session and turn are preserved; the tree's
+  latest-user restriction still applies. Errors appear next to the action
+  instead of silently falling back to a native fork, and concurrent clicks
+  from the same source are deduplicated.
 - The focus action now lives on the row that starts a fork or clone branch
   (the row carrying the `分叉` / `克隆` badge) instead of the shared fork
   anchor. Focusing the anchor kept the whole trunk continuation, so a fork
