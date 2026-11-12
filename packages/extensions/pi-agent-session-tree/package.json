@@ -1,7 +1,7 @@
 {
   "name": "@ryanlee2007/dsh-pi-agent-session-tree",
   "description": "Host domain service for append-only multi-branch session trees: SessionTree store, JSON snapshots, and the sessionTree Remote API.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publishConfig": {
     "access": "public"
   },

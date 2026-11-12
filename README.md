@@ -6,11 +6,12 @@
 [![Harness](https://img.shields.io/badge/DeepSeek--Harness-0.2.2--rc.1-orange)](https://github.com/deepseek-ai/deepseek-harness)
 
 Append-only, multi-branch conversation trees for
-[DeepSeek-Harness](https://github.com/deepseek-ai/deepseek-harness) — fork any
-historical node, clone a branch into a new session, and browse the whole
-lineage as one merged WebUI graph. Old history is never edited or deleted.
+[DeepSeek-Harness](https://github.com/deepseek-ai/deepseek-harness) — fork the
+latest user turn into an editable child session, clone the current conversation,
+and browse the whole lineage as one merged WebUI graph. Old history is never
+edited or deleted.
 
-This is the **v0.1.2 release** of this repository. The 0.1.1 line was the first
+This is the **v0.1.3 release** of this repository. The 0.1.1 line was the first
 registry release under the independent `@ryanlee2007` npm scope. It is based on the upstream
 [robiteame/dsh-session-tree-extension](https://github.com/robiteame/dsh-session-tree-extension)
 project; the original copyright notice and the full MIT license text are
@@ -21,11 +22,16 @@ Three commands:
 | Command | What it does |
 |---|---|
 | `/tree` | Open the merged lineage graph: every non-subagent session and node, clickable and bindable |
-| `/fork` | Branch from any historical node — the fork appears in the graph and as an inline menu under its source session |
+| `/fork` | Fork the latest user turn into an editable child session — it appears in the graph and as an inline menu under its source session |
 | `/clone` | Duplicate the current conversation into an independent new session under the same project |
 
 ## Highlights
 
+- **Chat footer forks**: “Branch into a new conversation” now uses the tree's
+  fork flow, records lineage, and seeds the child composer with an editable
+  prompt. Only the latest user turn can be forked; older-turn attempts show a
+  reason without falling back to the native fork. The prompt is never sent
+  automatically.
 - **Branch focus**: click the target icon on the row that starts a fork or
   clone branch (the row carrying the `分叉` / `克隆` badge) to show only that
   branch and its nested forks. The branch row pins to the top, the view is
@@ -102,7 +108,7 @@ dsh plugin --profile <profile> add @ryanlee2007/dsh-session-tree
 Prebuilt tarballs install the same way and need no build scripts:
 
 ```sh
-dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.2.tgz
+dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.3.tgz
 ```
 
 After installing, restart the profile. Verify the composed layer:

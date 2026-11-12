@@ -1,0 +1,42 @@
+{
+  "version": "0.1.3",
+  "date": "2026-11-12",
+  "packages": [
+    {
+      "name": "@ryanlee2007/dsh-pi-agent-session-tree",
+      "version": "0.1.3",
+      "file": "ryanlee2007-dsh-pi-agent-session-tree-0.1.3.tgz",
+      "bytes": 42151,
+      "sha256": "be5fc6999ab697382d5198475dba491d36edf991e3b46f3391aacf27ef5a2deb",
+      "integrity": "sha512-sl1sB36To5nKCXhQqab396GoIBkMIwBoJvwQu6FFPo+a4c/PRJlDDlibM6Vp/KoVk4vQ+Qy7NJUZr7zlmuTe+A==",
+      "fileCount": 17
+    },
+    {
+      "name": "@ryanlee2007/dsh-tool-session-tree",
+      "version": "0.1.3",
+      "file": "ryanlee2007-dsh-tool-session-tree-0.1.3.tgz",
+      "bytes": 11354,
+      "sha256": "f8e46b9598f1e2acbec549bf8967d4e2f12c26a2d240d40a076378454eb0705d",
+      "integrity": "sha512-tCbBXIZOFv6IzA5x/zjr6GGgmyS0m749Fc0bMHBfxXJrOeWxS3Hn7gXi9oYUcXClBmSyFGdbwsI4LADYgAr2TQ==",
+      "fileCount": 7
+    },
+    {
+      "name": "@ryanlee2007/dsh-client-ui-session-tree",
+      "version": "0.1.3",
+      "file": "ryanlee2007-dsh-client-ui-session-tree-0.1.3.tgz",
+      "bytes": 173484,
+      "sha256": "03ae5556851904a1cd799a4b5ee47efe8a261c1884c20b87b11a16c262229d85",
+      "integrity": "sha512-095dGCl0qBXItHPRy3snZU654rBexIgDokipV7j7uLzhsNaW5KQF29zhJjmncE3flSXAFTudoqOPpzv3zUAF3Q==",
+      "fileCount": 27
+    },
+    {
+      "name": "@ryanlee2007/dsh-session-tree",
+      "version": "0.1.3",
+      "file": "ryanlee2007-dsh-session-tree-0.1.3.tgz",
+      "bytes": 2088,
+      "sha256": "51a01afb478ac0fceb6f1946c409064f70272dd341e46c41dbacb22ed48a753e",
+      "integrity": "sha512-5LbwLGIEOwWxfjPUZvVssR83MjN998wW2o1T3qI6xby/2RH8vaa9PgHDui+ent5tEuaeOA/n0vocKUZsLgNQ4g==",
+      "fileCount": 4
+    }
+  ]
+}

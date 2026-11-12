@@ -1,7 +1,7 @@
 {
   "name": "@ryanlee2007/dsh-client-ui-session-tree",
   "description": "WebUI session-tree panel for DeepSeek Harness: merged lineage graph, subtree focus, stable branch colours, and inline fork menus.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publishConfig": {
     "access": "public"
   },
@@ -50,7 +50,7 @@
     "@deepseek-ai/dsh-commands": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-session": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-client-ui-workspace": "^0.2.2-rc.1",
-    "@ryanlee2007/dsh-pi-agent-session-tree": "^0.1.2"
+    "@ryanlee2007/dsh-pi-agent-session-tree": "^0.1.3"
   },
   "files": [
     "lib/index.js",
