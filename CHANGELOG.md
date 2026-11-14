@@ -6,15 +6,18 @@
   fork it appears under every filter; when only archived forks remain it
   appears under "all conversations" and "archived only" (where the restore
   section is reachable), never under "hide archived" and never as a `x0`
-  header.
+  header. An archived-only menu is appended to the bottom of its workspace
+  group instead of under the parent Session row.
 - Inline fork menus start collapsed when the Host starts or restarts. Opening
   a menu survives collapsing and re-expanding its workspace (the state lives
   for the page process, not the component instance).
 - Collapse and expand now scale their duration with the measured content
   height (roughly 200–600 ms), so tall menus no longer snap shut at the fixed
   160 ms speed. The menu uses one geometric fold: content no longer fades on a
-  separate timeline, and `overflow-anchor: none` keeps the native list from
-  pinning the sessions below while the menu shrinks.
+  separate timeline. Scroll anchoring is disabled on the surrounding sidebar
+  scroller only while the fold runs and restored afterwards, so a very tall
+  menu or a menu spanning more than one viewport folds without the list being
+  pinned or starting from a wrong offset.
 - A new fork opens with an empty composer. The selected or previous user
   prompt is no longer replayed into the child Session's editor.
 - Finished background forks show the Host's green completion dot; while the
