@@ -337,3 +337,26 @@
 .archivedRestore:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
+
+/* Completion dot at the front of a fork row, like the native session tab. */
+.rowCompletedDot {
+  align-self: center;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+/* A collapsed branch menu leaves its completed forks invisible, so the native
+   parent row carries their reminder at the front of the row. */
+:global([data-session-tree-branch-completed='true'])::before {
+  content: '';
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}

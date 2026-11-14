@@ -1297,7 +1297,7 @@ describe('session tree browser plugin', () => {
     }
   })
 
-  it('shows the Host completion reminder on rows and the collapsed header', async () => {
+  it('puts the fork completion dot in front of the row and mirrors it on the collapsed parent tab', async () => {
     const source = sid('done-s1')
     const child = sid('done-child')
     const lineage = new SessionForkLineage()
@@ -1328,10 +1328,21 @@ describe('session tree browser plugin', () => {
 
     await waitFor(() => {
       const row = document.querySelector(`[data-branch-session-id="${child}"]`)
-      expect(row?.querySelector('[data-branch-completed="true"]')).not.toBeNull()
+      const dot = row?.querySelector('[data-branch-completed="true"]')
+      expect(dot).not.toBeNull()
+      // The dot sits before the row's open button, not in the badge line.
+      expect(dot?.nextElementSibling?.tagName).toBe('BUTTON')
     })
-    // The menu is collapsed by default, so the header carries the same reminder.
-    expect(document.querySelector('[data-session-tree-branch-menu] [data-branch-menu-completed]')).not.toBeNull()
+    // Collapsed by default: the reminder lives on the native parent tab.
+    const sourceRow = document.querySelector<HTMLElement>(`[data-row-key="session:${source}"]`)
+    expect(sourceRow?.getAttribute('data-session-tree-branch-completed')).toBe('true')
+    expect(document.querySelector('[data-session-tree-branch-menu] [data-branch-menu-completed]')).toBeNull()
+
+    fireEvent.click(document.querySelector<HTMLElement>('[data-session-tree-branch-menu] button[aria-expanded]')!)
+    await waitFor(() => {
+      expect(document.querySelector('[data-session-tree-branch-menu] [data-branch-menu-completed]')).not.toBeNull()
+    })
+    expect(sourceRow?.hasAttribute('data-session-tree-branch-completed')).toBe(false)
 
     statusMap = new Map([[child, { running: false, pendingInteraction: undefined, completionUnread: false }]])
     view.rerender(
@@ -1347,6 +1358,50 @@ describe('session tree browser plugin', () => {
       expect(document.querySelector('[data-branch-completed="true"]')).toBeNull()
     })
     expect(document.querySelector('[data-branch-menu-completed]')).toBeNull()
+    expect(sourceRow?.hasAttribute('data-session-tree-branch-completed')).toBe(false)
+  })
+
+  it('shows a finished nested fork on its collapsed parent fork row', async () => {
+    const source = sid('nested-s')
+    const child = sid('nested-c')
+    const grandchild = sid('nested-g')
+    const lineage = new SessionForkLineage()
+    lineage.record({ childId: child, parentId: source, summary: 'first fork' })
+    lineage.record({ childId: grandchild, parentId: child, summary: 'nested fork' })
+    const state = fakeListState([source, child, grandchild], Object.fromEntries([
+      fakeRow(source, 'Source'),
+      fakeRow(child, 'Fork', source),
+      fakeRow(grandchild, 'Nested fork', child),
+    ]), source)
+    const statusMap = new Map<SessionId, { running: boolean; pendingInteraction: undefined; completionUnread: boolean }>([
+      [grandchild, { running: false, pendingInteraction: undefined, completionUnread: true }],
+    ])
+    const useSessionStatus = (<T,>(select: (value: typeof statusMap) => T): T => select(statusMap))
+    const useSessions = (<T,>(select: (value: typeof state) => T): T => select(state))
+    renderNativeSessionRows([{ id: source, title: 'Source' }, { id: child, title: 'Fork' }])
+    const Menu = SessionBranchList as unknown as ComponentType<Record<string, unknown>>
+    render(
+      <Menu
+        lineage={lineage}
+        openSession={vi.fn()}
+        useSessions={useSessions}
+        useSessionStatus={useSessionStatus}
+        t={t}
+      />,
+    )
+    await waitFor(() => {
+      expect(document.querySelector(`[data-branch-session-id="${child}"]`)).not.toBeNull()
+    })
+    fireEvent.click(document.querySelector<HTMLElement>('[data-session-tree-branch-menu] button[aria-expanded]')!)
+    await waitFor(() => {
+      expect(document.querySelector(`[data-branch-session-id="${grandchild}"]`)).not.toBeNull()
+    })
+    const childRow = document.querySelector<HTMLElement>(`[data-branch-session-id="${child}"]`)!
+    fireEvent.click(childRow.querySelector<HTMLElement>('button[aria-expanded]')!)
+    await waitFor(() => {
+      expect(childRow.querySelector('[data-branch-completed="true"]')).not.toBeNull()
+    })
+    expect(childRow.querySelector('[data-branch-completed="true"]')?.nextElementSibling?.tagName).toBe('BUTTON')
   })
 
   it('rebuilds the inline fork list from native child ids without stored lineage', async () => {

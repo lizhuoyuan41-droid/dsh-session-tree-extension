@@ -44,6 +44,7 @@ const noArchiveSnapshot = () => EMPTY_ARCHIVES
 const BRANCH_HOST = '[data-session-tree-branch-host]'
 const HIDDEN_ATTRIBUTE = 'data-session-tree-branch-hidden'
 const PREVIOUS_DISPLAY_ATTRIBUTE = 'data-session-tree-branch-previous-display'
+const SOURCE_COMPLETED_ATTRIBUTE = 'data-session-tree-branch-completed'
 
 /** One rendered /fork descendant inside an inline branch menu. */
 interface BranchRow {
@@ -309,6 +310,7 @@ function BranchChildren({
 function BranchRowView({
   row,
   expanded,
+  completedDescendant,
   onToggle,
   onOpen,
   openSessionMenu,
@@ -316,6 +318,8 @@ function BranchRowView({
 }: {
   row: BranchRow
   expanded: boolean
+  /** A finished fork is hidden inside this row's collapsed children. */
+  completedDescendant: boolean
   onToggle: (sessionId: SessionId) => void
   onOpen: (sessionId: SessionId) => void
   openSessionMenu?: OpenSessionMenu | undefined
@@ -360,6 +364,15 @@ function BranchRowView({
       ) : (
         <span className={css.expanderPlaceholder} aria-hidden="true" />
       )}
+      {row.running || (!row.completed && !completedDescendant) ? null : (
+        <span
+          className={css.rowCompletedDot}
+          role="img"
+          aria-label={t('branch.node.completed')}
+          title={t('branch.node.completed')}
+          data-branch-completed="true"
+        />
+      )}
       <button
         type="button"
         className={css.select}
@@ -373,19 +386,7 @@ function BranchRowView({
           {row.entry.branch === undefined
             ? null
             : <span className={css.branchChip}>{row.entry.branch}</span>}
-          {row.running
-            ? <span className={css.runningDot} />
-            : row.completed
-              ? (
-                  <span
-                    className={css.completedDot}
-                    role="img"
-                    aria-label={t('branch.node.completed')}
-                    title={t('branch.node.completed')}
-                    data-branch-completed="true"
-                  />
-                )
-              : null}
+          {row.running ? <span className={css.runningDot} /> : null}
         </span>
         <span className={css.summary}>{row.title}</span>
       </button>
@@ -489,6 +490,17 @@ function BranchMenu({
     holdForRow(sessionId)
     onToggleRow(sessionId)
   }
+  // When a row's own children are folded away, surface a finished descendant
+  // on that row instead of leaving the reminder invisible.
+  const completedInside = new Map<SessionId, boolean>()
+  for (let i = 0; i < activeRows.length; i += 1) {
+    const depth = activeRows[i]!.depth
+    let any = false
+    for (let j = i + 1; j < activeRows.length && activeRows[j]!.depth > depth; j += 1) {
+      if (activeRows[j]!.completed) { any = true; break }
+    }
+    completedInside.set(activeRows[i]!.sessionId, any)
+  }
   // Render every level as a tree so each parent owns an animated children
   // container; collapsing one branch no longer removes its descendants.
   const renderRows = (start: number, depth: number): { nodes: React.ReactNode[]; next: number } => {
@@ -508,6 +520,7 @@ function BranchMenu({
           key={row.sessionId}
           row={row}
           expanded={!collapsed.has(row.sessionId)}
+          completedDescendant={collapsed.has(row.sessionId) && completedInside.get(row.sessionId) === true}
           onToggle={toggleRow}
           onOpen={onOpen}
           openSessionMenu={openSessionMenu}
@@ -555,7 +568,7 @@ function BranchMenu({
               x{activeRows.length}
             </span>
           )}
-          {completedCount === 0 ? null : (
+          {completedCount === 0 || !expanded ? null : (
             <span
               className={css.completedDot}
               role="img"
@@ -725,6 +738,7 @@ export function SessionBranchList({
   const [archivedRowsVisible, setArchivedRowsVisible] = useState(false)
   const hostsRef = useRef<ReadonlyMap<SessionId, HTMLElement>>(hosts)
   const hiddenRows = useRef(new Map<HTMLElement, HiddenRow>())
+  const completedRows = useRef(new Map<HTMLElement, string | null>())
   const matchedRows = useRef(new WeakMap<HTMLElement, SessionId>())
   const rebuildRef = useRef<() => void>(() => {})
 
@@ -810,9 +824,32 @@ export function SessionBranchList({
         }
       }
 
+      // A collapsed menu hides every fork row. Keep their finished reminder on
+      // the native parent tab so it is visible without opening the menu.
+      const completedSources = new Set<SessionId>()
+      for (const group of visibleGroups) {
+        if (!hostSessions.has(group.sourceId) || openMenus.has(group.sourceId)) continue
+        if (!group.rows.some(row => row.completed)) continue
+        if (statuses.get(group.sourceId)?.completionUnread === true) continue
+        completedSources.add(group.sourceId)
+      }
+
       // Do nothing unless the plugin layout itself changes; unrelated native
       // re-renders must keep their own animations untouched.
       let changed = hostsRef.current.size !== hostSessions.size
+      if (!changed) {
+        const attributed = new Set<SessionId>()
+        for (const row of completedRows.current.keys()) {
+          const key = row.getAttribute('data-row-key')
+          if (key?.startsWith('session:')) attributed.add(key.slice('session:'.length) as SessionId)
+        }
+        changed = attributed.size !== completedSources.size
+        if (!changed) {
+          for (const sourceId of completedSources) {
+            if (!attributed.has(sourceId)) { changed = true; break }
+          }
+        }
+      }
       if (!changed) {
         for (const [sourceId, host] of hostsRef.current) {
           const sourceRow = rowById.get(sourceId)
@@ -887,12 +924,25 @@ export function SessionBranchList({
         row.style.display = 'none'
       }
 
+      for (const [row, previous] of completedRows.current) {
+        if (!row.isConnected) continue
+        if (previous === null) row.removeAttribute(SOURCE_COMPLETED_ATTRIBUTE)
+        else row.setAttribute(SOURCE_COMPLETED_ATTRIBUTE, previous)
+      }
+      completedRows.current.clear()
+      for (const sourceId of completedSources) {
+        const row = rowById.get(sourceId)
+        if (row === undefined) continue
+        completedRows.current.set(row, row.getAttribute(SOURCE_COMPLETED_ATTRIBUTE))
+        row.setAttribute(SOURCE_COMPLETED_ATTRIBUTE, 'true')
+      }
+
     }
 
     rebuildRef.current = rebuild
     rebuild()
     return restoreHiddenRows
-  }, [visibleGroups, state, openSessionMenu, archives])
+  }, [visibleGroups, state, openSessionMenu, archives, openMenus, statuses])
 
   useEffect(() => {
     if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return
@@ -912,6 +962,12 @@ export function SessionBranchList({
 
   useLayoutEffect(() => () => {
     restoreHiddenRows()
+    for (const [row, previous] of completedRows.current) {
+      if (!row.isConnected) continue
+      if (previous === null) row.removeAttribute(SOURCE_COMPLETED_ATTRIBUTE)
+      else row.setAttribute(SOURCE_COMPLETED_ATTRIBUTE, previous)
+    }
+    completedRows.current.clear()
     for (const host of hostsRef.current.values()) host.remove()
     hostsRef.current = new Map()
   }, [])
