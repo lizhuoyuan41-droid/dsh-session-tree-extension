@@ -13,10 +13,15 @@
 - Collapse and expand now scale their duration with the measured content
   height (roughly 200–600 ms), so tall menus no longer snap shut at the fixed
   160 ms speed. The menu uses one geometric fold: content no longer fades on a
-  separate timeline. Scroll anchoring is disabled on the surrounding sidebar
-  scroller only while the fold runs and restored afterwards, so a very tall
-  menu or a menu spanning more than one viewport folds without the list being
-  pinned or starting from a wrong offset.
+  separate timeline. The fold temporarily disables scroll anchoring on the
+  real sidebar scroller (never on the menu's own clipped container, which the
+  previous detection mistook for it), so a tall menu cannot be pinned by the
+  list below it.
+- Native workspace and session expansions animate rows with coordinates
+  measured before this plugin inserts its menus or hides the original fork
+  rows. After any such plugin layout change, the affected rows are replayed
+  from their visible position to the new final layout, so the movement no
+  longer starts from a stale offset.
 - A new fork opens with an empty composer. The selected or previous user
   prompt is no longer replayed into the child Session's editor.
 - Finished background forks show the Host's green completion dot; while the
