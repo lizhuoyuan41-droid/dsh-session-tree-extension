@@ -11,7 +11,7 @@ latest user turn into an editable child session, clone the current conversation,
 and browse the whole lineage as one merged WebUI graph. Old history is never
 edited or deleted.
 
-This is the **v0.1.3 release** of this repository. The 0.1.1 line was the first
+This is the **v0.1.4 release** of this repository. The 0.1.1 line was the first
 registry release under the independent `@ryanlee2007` npm scope. It is based on the upstream
 [robiteame/dsh-session-tree-extension](https://github.com/robiteame/dsh-session-tree-extension)
 project; the original copyright notice and the full MIT license text are
@@ -108,7 +108,7 @@ dsh plugin --profile <profile> add @ryanlee2007/dsh-session-tree
 Prebuilt tarballs install the same way and need no build scripts:
 
 ```sh
-dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.3.tgz
+dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.4.tgz
 ```
 
 After installing, restart the profile. Verify the composed layer:

@@ -24,12 +24,12 @@ dsh plugin --profile <profile> add @ryanlee2007/dsh-session-tree
 ```
 
 or with the prebuilt carrier tarball (no install scripts, no build step).
-The carrier depends on the other three packages at version `^0.1.3`; before
+The carrier depends on the other three packages at version `^0.1.4`; before
 registry publication, supply all four tarballs to the target package manager.
 A carrier tarball alone is not a fully offline distribution:
 
 ```sh
-dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.3.tgz
+dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.4.tgz
 ```
 
 The carrier package pulls its three implementation packages

@@ -1,7 +1,7 @@
 {
   "name": "@ryanlee2007/dsh-tool-session-tree",
   "description": "session_tree tool, /tree /fork /clone commands, and system-prompt section backed by the append-only session-tree store.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publishConfig": {
     "access": "public"
   },
@@ -31,7 +31,7 @@
     "@deepseek-ai/dsh-session": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-system-prompt": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-tools": "^0.2.2-rc.1",
-    "@ryanlee2007/dsh-pi-agent-session-tree": "^0.1.3"
+    "@ryanlee2007/dsh-pi-agent-session-tree": "^0.1.4"
   },
   "engines": {
     "node": ">=22"

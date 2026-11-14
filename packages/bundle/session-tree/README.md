@@ -24,7 +24,7 @@ dsh plugin --profile <profile> add @ryanlee2007/dsh-session-tree
 or install the prebuilt tarball:
 
 ```sh
-dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.3.tgz
+dsh plugin --profile <profile> add ryanlee2007-dsh-session-tree-0.1.4.tgz
 ```
 
 This package carries no code of its own: `dependencies` pulls the three
