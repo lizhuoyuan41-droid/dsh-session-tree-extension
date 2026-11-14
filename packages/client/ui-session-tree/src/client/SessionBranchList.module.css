@@ -13,9 +13,6 @@
   padding: 2px 6px 6px 18px;
   list-style: none;
   overflow-x: hidden;
-  /* The menu's height transition must move the rows below it; excluding the
-     menu from scroll anchoring keeps the native list from pinning them. */
-  overflow-anchor: none;
 }
 
 .menuBody {

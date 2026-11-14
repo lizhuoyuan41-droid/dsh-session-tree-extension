@@ -35,6 +35,16 @@ export function toggleBranchMenu(sessionId: SessionId): void {
   publish()
 }
 
+/**
+ * Fold duration for one menu: long content keeps a readable speed, bounded so
+ * a huge menu cannot take seconds to settle.
+ * @param contentHeight - measured content height in pixels.
+ * @returns transition duration in milliseconds.
+ */
+export function branchMenuDuration(contentHeight: number): number {
+  return Math.min(600, Math.max(200, Math.round(200 + contentHeight * 0.4)))
+}
+
 /** Drop every remembered expansion (tests and full page teardown only). */
 export function resetBranchMenus(): void {
   openMenus.clear()

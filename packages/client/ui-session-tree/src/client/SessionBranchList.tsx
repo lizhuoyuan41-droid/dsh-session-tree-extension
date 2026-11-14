@@ -26,7 +26,8 @@ import type { ForkLineageEntry, SessionForkLineage } from './fork-lineage.ts'
 import css from './SessionBranchList.module.css'
 import { currentSessionId } from './session-list.ts'
 import { branchTopics, subscribeBranchTopics, type BranchTopic } from './branch-topic.ts'
-import { branchMenusSnapshot, subscribeBranchMenus, toggleBranchMenu } from './branch-menu-state.ts'
+import { branchMenusSnapshot, subscribeBranchMenus, toggleBranchMenu, branchMenuDuration } from './branch-menu-state.ts'
+import { holdScrollAnchorDuring } from './scroll-anchor.ts'
 
 type OpenSessionMenu = (sessionId: SessionId, displayTitle: string, point: { x: number; y: number }) => void
 interface ArchiveState { readonly archivedSessionIds: readonly SessionId[] }
@@ -287,7 +288,7 @@ function BranchChildren({
   // tall subtree does not snap shut in the same fixed time as one row.
   useLayoutEffect(() => {
     const height = ref.current?.scrollHeight ?? 0
-    const duration = Math.min(600, Math.max(200, Math.round(200 + height * 0.4)))
+    const duration = branchMenuDuration(height)
     shellRef.current?.style.setProperty('--branch-collapse-duration', `${duration}ms`)
   }, [expanded])
   return (
@@ -464,7 +465,7 @@ function BranchMenu({
   // readable travel speed instead of collapsing in the fixed short duration.
   useLayoutEffect(() => {
     const height = bodyRef.current?.scrollHeight ?? 0
-    const duration = Math.min(600, Math.max(200, Math.round(200 + height * 0.4)))
+    const duration = branchMenuDuration(height)
     shellRef.current?.style.setProperty('--branch-collapse-duration', `${duration}ms`)
   }, [expanded])
   // Only forks split from THIS parent belong under its menu. The archived
@@ -475,6 +476,18 @@ function BranchMenu({
   const restoredCount = groupArchivedForks.length
   const parentNameOf = (entry: ForkLineageEntry): string =>
     titleOf(entry.parentId) || entry.parentId
+  /** Keep the native scroller from re-anchoring while one fold runs. */
+  const holdForRow = (sessionId: SessionId): void => {
+    const nested = shellRef.current?.querySelector<HTMLElement>(
+      `[data-session-tree-branch-body][data-branch-parent="${sessionId}"]`,
+    )
+    const content = nested?.querySelector<HTMLElement>('ul')
+    holdScrollAnchorDuring(nested ?? shellRef.current, branchMenuDuration(content?.scrollHeight ?? 0))
+  }
+  const toggleRow = (sessionId: SessionId): void => {
+    holdForRow(sessionId)
+    onToggleRow(sessionId)
+  }
   // Render every level as a tree so each parent owns an animated children
   // container; collapsing one branch no longer removes its descendants.
   const renderRows = (start: number, depth: number): { nodes: React.ReactNode[]; next: number } => {
@@ -494,7 +507,7 @@ function BranchMenu({
           key={row.sessionId}
           row={row}
           expanded={!collapsed.has(row.sessionId)}
-          onToggle={onToggleRow}
+          onToggle={toggleRow}
           onOpen={onOpen}
           openSessionMenu={openSessionMenu}
           t={t}
@@ -527,7 +540,10 @@ function BranchMenu({
           aria-expanded={expanded}
           aria-label={`${toggleLabel} - ${group.sourceTitle}`}
           title={toggleLabel}
-          onClick={() => { onToggle(group.sourceId) }}
+          onClick={() => {
+            holdScrollAnchorDuring(shellRef.current, branchMenuDuration(bodyRef.current?.scrollHeight ?? 0))
+            onToggle(group.sourceId)
+          }}
         >
           <svg viewBox="0 0 12 12" aria-hidden="true">
             <path d="M3.8 1.8 9.4 6l-5.6 4.2Z" fill="currentColor" />
@@ -777,6 +793,7 @@ export function SessionBranchList({
       setArchivedRowsVisible(current => current === nextArchivedRowsVisible ? current : nextArchivedRowsVisible)
 
       const nextHosts = new Map<SessionId, HTMLElement>()
+      const archivedIds = new Set(archives.archivedSessionIds)
       for (const group of visibleGroups) {
         const sourceRow = rowById.get(group.sourceId)
         if (sourceRow === undefined || sourceRow.parentElement === null) continue
@@ -788,7 +805,22 @@ export function SessionBranchList({
           host.dataset.sessionTreeBranchHost = 'mounted'
         }
         host.dataset.sessionTreeBranchTarget = group.sourceId
-        if (
+        const archivedOnly = group.rows.every(row => archivedIds.has(row.sessionId))
+        if (archivedOnly) {
+          // An archived-only menu is a workspace-level archive section, not a
+          // child of one Session row: append it at the end of its workspace.
+          const tree = sourceRow.closest('[role="tree"]')
+          let section: HTMLElement = sourceRow
+          while (tree !== null && section.parentElement !== null && section.parentElement !== tree) {
+            section = section.parentElement
+          }
+          if (tree !== null && section !== sourceRow && section.parentElement === tree) {
+            if (section.lastElementChild !== host) section.append(host)
+          } else if (host.previousElementSibling !== sourceRow) {
+            // Flat lists without workspace wrappers keep the row-local anchor.
+            sourceRow.parentElement.insertBefore(host, sourceRow.nextSibling)
+          }
+        } else if (
           host.parentElement !== sourceRow.parentElement
           || host.previousElementSibling !== sourceRow
         ) {

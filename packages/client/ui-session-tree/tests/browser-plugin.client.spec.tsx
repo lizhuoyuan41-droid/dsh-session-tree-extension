@@ -19,6 +19,7 @@ import { SessionForkLineage, FORK_LINEAGE_STORAGE_KEY } from '../src/client/fork
 import { apply, inject } from '../src/client/index.ts'
 import { rememberBranchTopic, resetBranchTopicsForTests } from '../src/client/branch-topic.ts'
 import { resetBranchMenus } from '../src/client/branch-menu-state.ts'
+import { holdScrollAnchorDuring } from '../src/client/scroll-anchor.ts'
 import { resetFocusKeyForTests } from '../src/client/focus-store.ts'
 import type { SessionTreePanelActions } from '../src/client/slots.ts'
 
@@ -1192,6 +1193,98 @@ describe('session tree browser plugin', () => {
     await waitFor(() => {
       expect(document.querySelector(`[data-session-tree-branch-menu="${sourceId}"]`)).toBeNull()
     })
+  })
+
+  it('moves an archived-only menu to the bottom of its workspace group', async () => {
+    const sourceId = sid('arch-source')
+    const childId = sid('arch-child')
+    const lineage = new SessionForkLineage()
+    lineage.record({ childId, parentId: sourceId, summary: 'archived fork', createdAt: 2 })
+    const state = fakeListState(
+      [sourceId, childId],
+      Object.fromEntries([
+        fakeRow(sourceId, 'Archived source'),
+        fakeRow(childId, 'Archived child', sourceId),
+      ]),
+      sourceId,
+    )
+    const useSessions = (<T,>(select: (value: typeof state) => T): T => select(state))
+    const archiveSnapshot = { archivedSessionIds: [childId] as SessionId[] }
+    const archiveSource = {
+      getSnapshot: () => archiveSnapshot,
+      subscribe: () => () => {},
+    }
+    // Two workspace sections under one native tree: the archived-only menu must
+    // land at the end of the source's own section, not under its Session row.
+    const root = document.createElement('div')
+    root.innerHTML = `<div role="tree">
+      <div data-test-group="dv14">
+        <div role="treeitem" aria-selected="false" data-row-key="session:arch-source">Archived source</div>
+        <div role="treeitem" aria-selected="false" data-row-key="session:arch-child">Archived child</div>
+        <button data-row-key="overflow:dv14">more</button>
+      </div>
+      <div data-test-group="dv13">
+        <div role="treeitem" aria-selected="false" data-row-key="session:other">Other</div>
+      </div>
+    </div>`
+    document.body.append(root)
+    try {
+      const Menu = SessionBranchList as unknown as ComponentType<Record<string, unknown>>
+      render(
+        <Menu
+          lineage={lineage}
+          openSession={vi.fn()}
+          openSessionMenu={vi.fn()}
+          archiveSource={archiveSource}
+          unarchive={vi.fn()}
+          useSessions={useSessions}
+          t={t}
+        />,
+      )
+      const host = await waitFor(() => {
+        const element = root.querySelector<HTMLElement>('[data-session-tree-branch-host]')
+        expect(element).not.toBeNull()
+        return element!
+      })
+      const dv14 = root.querySelector<HTMLElement>('[data-test-group="dv14"]')!
+      expect(host.parentElement).toBe(dv14)
+      expect(dv14.lastElementChild).toBe(host)
+      expect(host.previousElementSibling?.getAttribute('data-row-key')).toBe('overflow:dv14')
+      expect(root.querySelector('[data-test-group="dv13"]')?.contains(host)).toBe(false)
+      await screen.findByLabelText(`${zh['branch.archived.restore']} - Archived source · archived fork`)
+    } finally {
+      root.remove()
+    }
+  })
+
+  it('disables scroll anchoring only for the fold duration', () => {
+    vi.useFakeTimers()
+    try {
+      const scroller = document.createElement('div')
+      scroller.style.overflowY = 'auto'
+      const menu = document.createElement('div')
+      scroller.append(menu)
+      document.body.append(scroller)
+
+      holdScrollAnchorDuring(menu, 300)
+      expect(scroller.style.overflowAnchor).toBe('none')
+      vi.advanceTimersByTime(359)
+      expect(scroller.style.overflowAnchor).toBe('none')
+      vi.advanceTimersByTime(1)
+      expect(scroller.style.overflowAnchor).toBe('')
+
+      // A second fold before the first restores must keep anchoring disabled
+      // until the latest fold ends.
+      holdScrollAnchorDuring(menu, 200)
+      holdScrollAnchorDuring(menu, 200)
+      vi.advanceTimersByTime(259)
+      expect(scroller.style.overflowAnchor).toBe('none')
+      vi.advanceTimersByTime(1)
+      expect(scroller.style.overflowAnchor).toBe('')
+      scroller.remove()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows the Host completion reminder on rows and the collapsed header', async () => {
