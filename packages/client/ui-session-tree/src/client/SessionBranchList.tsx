@@ -44,7 +44,6 @@ const noArchiveSnapshot = () => EMPTY_ARCHIVES
 const BRANCH_HOST = '[data-session-tree-branch-host]'
 const HIDDEN_ATTRIBUTE = 'data-session-tree-branch-hidden'
 const PREVIOUS_DISPLAY_ATTRIBUTE = 'data-session-tree-branch-previous-display'
-const SOURCE_COMPLETED_ATTRIBUTE = 'data-session-tree-branch-completed'
 
 /** One rendered /fork descendant inside an inline branch menu. */
 interface BranchRow {
@@ -568,7 +567,7 @@ function BranchMenu({
               x{activeRows.length}
             </span>
           )}
-          {completedCount === 0 || !expanded ? null : (
+          {completedCount === 0 ? null : (
             <span
               className={css.completedDot}
               role="img"
@@ -738,7 +737,6 @@ export function SessionBranchList({
   const [archivedRowsVisible, setArchivedRowsVisible] = useState(false)
   const hostsRef = useRef<ReadonlyMap<SessionId, HTMLElement>>(hosts)
   const hiddenRows = useRef(new Map<HTMLElement, HiddenRow>())
-  const completedRows = useRef(new Map<HTMLElement, string | null>())
   const matchedRows = useRef(new WeakMap<HTMLElement, SessionId>())
   const rebuildRef = useRef<() => void>(() => {})
 
@@ -824,32 +822,9 @@ export function SessionBranchList({
         }
       }
 
-      // A collapsed menu hides every fork row. Keep their finished reminder on
-      // the native parent tab so it is visible without opening the menu.
-      const completedSources = new Set<SessionId>()
-      for (const group of visibleGroups) {
-        if (!hostSessions.has(group.sourceId) || openMenus.has(group.sourceId)) continue
-        if (!group.rows.some(row => row.completed)) continue
-        if (statuses.get(group.sourceId)?.completionUnread === true) continue
-        completedSources.add(group.sourceId)
-      }
-
       // Do nothing unless the plugin layout itself changes; unrelated native
       // re-renders must keep their own animations untouched.
       let changed = hostsRef.current.size !== hostSessions.size
-      if (!changed) {
-        const attributed = new Set<SessionId>()
-        for (const row of completedRows.current.keys()) {
-          const key = row.getAttribute('data-row-key')
-          if (key?.startsWith('session:')) attributed.add(key.slice('session:'.length) as SessionId)
-        }
-        changed = attributed.size !== completedSources.size
-        if (!changed) {
-          for (const sourceId of completedSources) {
-            if (!attributed.has(sourceId)) { changed = true; break }
-          }
-        }
-      }
       if (!changed) {
         for (const [sourceId, host] of hostsRef.current) {
           const sourceRow = rowById.get(sourceId)
@@ -924,25 +899,12 @@ export function SessionBranchList({
         row.style.display = 'none'
       }
 
-      for (const [row, previous] of completedRows.current) {
-        if (!row.isConnected) continue
-        if (previous === null) row.removeAttribute(SOURCE_COMPLETED_ATTRIBUTE)
-        else row.setAttribute(SOURCE_COMPLETED_ATTRIBUTE, previous)
-      }
-      completedRows.current.clear()
-      for (const sourceId of completedSources) {
-        const row = rowById.get(sourceId)
-        if (row === undefined) continue
-        completedRows.current.set(row, row.getAttribute(SOURCE_COMPLETED_ATTRIBUTE))
-        row.setAttribute(SOURCE_COMPLETED_ATTRIBUTE, 'true')
-      }
-
     }
 
     rebuildRef.current = rebuild
     rebuild()
     return restoreHiddenRows
-  }, [visibleGroups, state, openSessionMenu, archives, openMenus, statuses])
+  }, [visibleGroups, state, openSessionMenu, archives])
 
   useEffect(() => {
     if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return
@@ -962,12 +924,6 @@ export function SessionBranchList({
 
   useLayoutEffect(() => () => {
     restoreHiddenRows()
-    for (const [row, previous] of completedRows.current) {
-      if (!row.isConnected) continue
-      if (previous === null) row.removeAttribute(SOURCE_COMPLETED_ATTRIBUTE)
-      else row.setAttribute(SOURCE_COMPLETED_ATTRIBUTE, previous)
-    }
-    completedRows.current.clear()
     for (const host of hostsRef.current.values()) host.remove()
     hostsRef.current = new Map()
   }, [])

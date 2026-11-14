@@ -1333,16 +1333,15 @@ describe('session tree browser plugin', () => {
       // The dot sits before the row's open button, not in the badge line.
       expect(dot?.nextElementSibling?.tagName).toBe('BUTTON')
     })
-    // Collapsed by default: the reminder lives on the native parent tab.
-    const sourceRow = document.querySelector<HTMLElement>(`[data-row-key="session:${source}"]`)
-    expect(sourceRow?.getAttribute('data-session-tree-branch-completed')).toBe('true')
-    expect(document.querySelector('[data-session-tree-branch-menu] [data-branch-menu-completed]')).toBeNull()
+    // Collapsed by default: the reminder stays on the branch menu header.
+    expect(document.querySelector('[data-session-tree-branch-menu] [data-branch-menu-completed]')).not.toBeNull()
+    // The native parent row never receives the plugin's reminder.
+    expect(document.querySelector(`[data-row-key="session:${source}"]`)?.hasAttribute('data-session-tree-branch-completed')).toBe(false)
 
     fireEvent.click(document.querySelector<HTMLElement>('[data-session-tree-branch-menu] button[aria-expanded]')!)
     await waitFor(() => {
       expect(document.querySelector('[data-session-tree-branch-menu] [data-branch-menu-completed]')).not.toBeNull()
     })
-    expect(sourceRow?.hasAttribute('data-session-tree-branch-completed')).toBe(false)
 
     statusMap = new Map([[child, { running: false, pendingInteraction: undefined, completionUnread: false }]])
     view.rerender(
@@ -1358,7 +1357,6 @@ describe('session tree browser plugin', () => {
       expect(document.querySelector('[data-branch-completed="true"]')).toBeNull()
     })
     expect(document.querySelector('[data-branch-menu-completed]')).toBeNull()
-    expect(sourceRow?.hasAttribute('data-session-tree-branch-completed')).toBe(false)
   })
 
   it('shows a finished nested fork on its collapsed parent fork row', async () => {

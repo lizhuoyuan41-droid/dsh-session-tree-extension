@@ -27,10 +27,11 @@
   prompt is no longer replayed into the child Session's editor.
 - Finished background forks show the Host's green completion dot at the front
   of their menu row, matching a native Session tab.
-- While a branch menu is collapsed its completed forks are invisible, so the
-  reminder moves to the front of the parent Session row; expanding the menu
-  returns it to the fork rows. A collapsed nested fork shows a finished
-  descendant's reminder on its own row.
+- A completed fork is also counted on the branch menu header itself: the
+  reminder sits after the header label and count, and stays visible while the
+  menu is collapsed. The native parent Session row never receives the plugin's
+  reminder. A collapsed nested fork shows a finished descendant's reminder on
+  its own row.
 - Opening a fork still clears the reminder through the native status.
 
 ## 0.1.3 — 2026-11-12
