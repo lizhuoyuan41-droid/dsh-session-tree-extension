@@ -1,3 +1,22 @@
+## Unreleased
+
+### Fixed
+
+- The inline fork menu now appears only while at least one live (unarchived)
+  fork exists. Archiving the last fork removes the header, its `xN` count and
+  the host placeholder instead of leaving a `x0` header; the native archived
+  list remains the restore entry.
+- Inline fork menus start collapsed on every page load and restart. Only the
+  menus the user opens in the current page stay expanded.
+- Collapse and expand now scale their duration with the measured content
+  height (roughly 200–600 ms), so tall menus no longer snap shut at the fixed
+  160 ms speed.
+- A new fork opens with an empty composer. The selected or previous user
+  prompt is no longer replayed into the child Session's editor.
+- Finished background forks show the Host's green completion dot; while the
+  menu is collapsed, the header carries the same reminder. Opening the fork
+  clears it through the native status.
+
 ## 0.1.3 — 2026-11-12
 
 ### Fixed

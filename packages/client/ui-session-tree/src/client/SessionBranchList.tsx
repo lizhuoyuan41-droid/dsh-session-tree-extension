@@ -19,6 +19,7 @@ import {
 import { createPortal } from 'react-dom'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionTreeKey } from './locales.ts'
 import type { ForkLineageEntry, SessionForkLineage } from './fork-lineage.ts'
@@ -33,6 +34,7 @@ interface ArchiveSource {
   getSnapshot(): ArchiveState
 }
 const EMPTY_ARCHIVES: ArchiveState = { archivedSessionIds: [] }
+const EMPTY_STATUSES: SessionStatusSnapshot = new Map()
 const noArchiveSubscribe = () => () => {}
 const noArchiveSnapshot = () => EMPTY_ARCHIVES
 
@@ -51,6 +53,8 @@ interface BranchRow {
   readonly title: string
   readonly displayTitle: string
   readonly running: boolean
+  /** The Host reports an unacknowledged background stop (native green dot). */
+  readonly completed: boolean
   readonly current: boolean
 }
 
@@ -96,6 +100,7 @@ function branchGroups(
   state: SessionListState,
   entries: ReadonlyMap<SessionId, ForkLineageEntry>,
   topics: ReadonlyMap<SessionId, BranchTopic>,
+  statuses: SessionStatusSnapshot,
   forkLabel: (index: number) => string,
 ): BranchBuild {
   const byId = state.byId ?? {} as Record<SessionId, SessionSummary>
@@ -146,6 +151,7 @@ function branchGroups(
           title: branchLabel(summary?.displayTitle, parentTitle, topics.get(entry.childId), forkLabel(index + 1)),
           displayTitle: summary?.displayTitle ?? entry.childId,
           running: summary?.running === true,
+          completed: statuses.get(entry.childId)?.completionUnread === true,
           current: currentSessionId(state) === entry.childId,
         })
         const nextAncestors = new Set(ancestors)
@@ -272,11 +278,20 @@ function BranchChildren({
   children: React.ReactNode
 }) {
   const ref = useRef<HTMLUListElement>(null)
+  const shellRef = useRef<HTMLLIElement>(null)
   useEffect(() => {
     if (ref.current !== null) ref.current.inert = !expanded
   }, [expanded])
+  // Scale the collapse/expand duration with the measured content height so a
+  // tall subtree does not snap shut in the same fixed time as one row.
+  useLayoutEffect(() => {
+    const height = ref.current?.scrollHeight ?? 0
+    const duration = Math.min(600, Math.max(200, Math.round(200 + height * 0.4)))
+    shellRef.current?.style.setProperty('--branch-collapse-duration', `${duration}ms`)
+  }, [expanded])
   return (
     <li
+      ref={shellRef}
       className={css.menuBody}
       data-expanded={expanded}
       aria-hidden={!expanded}
@@ -355,7 +370,19 @@ function BranchRowView({
           {row.entry.branch === undefined
             ? null
             : <span className={css.branchChip}>{row.entry.branch}</span>}
-          {row.running ? <span className={css.runningDot} /> : null}
+          {row.running
+            ? <span className={css.runningDot} />
+            : row.completed
+              ? (
+                  <span
+                    className={css.completedDot}
+                    role="img"
+                    aria-label={t('branch.node.completed')}
+                    title={t('branch.node.completed')}
+                    data-branch-completed="true"
+                  />
+                )
+              : null}
         </span>
         <span className={css.summary}>{row.title}</span>
       </button>
@@ -396,6 +423,7 @@ function BranchMenu({
   expanded,
   collapsed,
   onToggle,
+  onToggleRow,
   onOpen,
   openSessionMenu,
   archivedForks,
@@ -409,7 +437,10 @@ function BranchMenu({
   group: BranchGroup
   expanded: boolean
   collapsed: ReadonlySet<SessionId>
+  /** Toggle the whole menu header. */
   onToggle: (sessionId: SessionId) => void
+  /** Toggle one nested branch row. */
+  onToggleRow: (sessionId: SessionId) => void
   onOpen: (sessionId: SessionId) => void
   openSessionMenu?: OpenSessionMenu | undefined
   archivedForks: readonly ForkLineageEntry[]
@@ -422,9 +453,18 @@ function BranchMenu({
 }) {
   const toggleLabel = expanded ? t('branch.menu.collapse') : t('branch.menu.expand')
   const activeRows = group.rows.filter(row => !archivedIds.has(row.sessionId))
+  const completedCount = activeRows.filter(row => row.completed).length
   const bodyRef = useRef<HTMLUListElement>(null)
+  const shellRef = useRef<HTMLLIElement>(null)
   useEffect(() => {
     if (bodyRef.current !== null) bodyRef.current.inert = !expanded
+  }, [expanded])
+  // Match the transition time to the measured menu height: long subtrees keep a
+  // readable travel speed instead of collapsing in the fixed short duration.
+  useLayoutEffect(() => {
+    const height = bodyRef.current?.scrollHeight ?? 0
+    const duration = Math.min(600, Math.max(200, Math.round(200 + height * 0.4)))
+    shellRef.current?.style.setProperty('--branch-collapse-duration', `${duration}ms`)
   }, [expanded])
   // Only forks split from THIS parent belong under its menu. The archived
   // entry is named after the parent Session (what it was forked from), not
@@ -453,7 +493,7 @@ function BranchMenu({
           key={row.sessionId}
           row={row}
           expanded={!collapsed.has(row.sessionId)}
-          onToggle={onToggle}
+          onToggle={onToggleRow}
           onOpen={onOpen}
           openSessionMenu={openSessionMenu}
           t={t}
@@ -474,6 +514,9 @@ function BranchMenu({
     return { nodes, next: index }
   }
   const tree = renderRows(0, activeRows[0]?.depth ?? 1)
+  // No live forks means no header, count or placeholder at all. Restoring an
+  // archived-only fork stays with the native archived list.
+  if (activeRows.length === 0) return null
   return (
     <ul className={css.menu} data-session-tree-branch-menu={group.sourceId}>
       <li className={css.menuHeaderItem}>
@@ -492,9 +535,24 @@ function BranchMenu({
           <span className={css.countChip} aria-label={`${activeRows.length} ${t('branch.tree.count')}`}>
             x{activeRows.length}
           </span>
+          {completedCount === 0 ? null : (
+            <span
+              className={css.completedDot}
+              role="img"
+              aria-label={t('branch.menu.completed')}
+              title={t('branch.menu.completed')}
+              data-branch-menu-completed={completedCount}
+            />
+          )}
         </button>
       </li>
-      <li className={css.menuBody} data-expanded={expanded} aria-hidden={!expanded} data-session-tree-branch-body>
+      <li
+        ref={shellRef}
+        className={css.menuBody}
+        data-expanded={expanded}
+        aria-hidden={!expanded}
+        data-session-tree-branch-body
+      >
         <ul className={css.menuList} ref={bodyRef}>
           {tree.nodes}
           {restoredCount === 0 || !showArchived ? null : (
@@ -570,6 +628,7 @@ export function SessionBranchList({
   unarchive,
   sessions,
   useSessions,
+  useSessionStatus,
   t,
 }: SessionBranchListProps) {
   const storedEntries = useSyncExternalStore(lineage.subscribe, lineage.getSnapshot, lineage.getSnapshot)
@@ -628,12 +687,12 @@ export function SessionBranchList({
   )
   // Archived forks return to the native archived list, whose filter and
   // unarchive action remain authoritative. Keep the lineage for restoration.
-  const entries = useMemo(() => new Map([...recordedEntries].filter(
-    ([id]) => !archives.archivedSessionIds.includes(id),
-  )), [recordedEntries, archives])
   const archivedForks = [...recordedEntries.values()].filter(entry =>
     archives.archivedSessionIds.includes(entry.childId))
   const [collapsed, setCollapsed] = useState<ReadonlySet<SessionId>>(() => new Set())
+  // Branch menus start collapsed on every load/restart; the set holds only the
+  // menus the user explicitly opened in this page session.
+  const [openMenus, setOpenMenus] = useState<ReadonlySet<SessionId>>(() => new Set())
   const [hosts, setHosts] = useState<ReadonlyMap<SessionId, HTMLElement>>(() => new Map())
   // Show archived forks only while the native list itself shows archived rows
   // (workspace filter "show/only"). Under the default "hide archived" filter
@@ -645,9 +704,25 @@ export function SessionBranchList({
   const rebuildRef = useRef<() => void>(() => {})
 
   const topics = useSyncExternalStore(subscribeBranchTopics, branchTopics, branchTopics)
-  const { groups, liveBranches } = useMemo(
-    () => branchGroups(state, recordedEntries, topics, index => `${t('branch.node.forkBadge')} ${index}`),
-    [state, recordedEntries, topics, t],
+  // Completion reminders come from the Host's unified Session status, so a
+  // finished background fork shows the same green dot as a native row.
+  const statuses = useSessionStatus === undefined
+    ? EMPTY_STATUSES
+    : useSessionStatus(value => value)
+  const { groups } = useMemo(
+    () => branchGroups(state, recordedEntries, topics, statuses, index => `${t('branch.node.forkBadge')} ${index}`),
+    [state, recordedEntries, topics, statuses, t],
+  )
+  // A group with no live fork has no menu: its header, count and host placeholder
+  // must all disappear once the last fork is archived. Archived parents of live
+  // descendants stay in the model so those descendants remain reachable.
+  const archivedIdSet = useMemo(
+    () => new Set(archives.archivedSessionIds),
+    [archives],
+  )
+  const visibleGroups = useMemo(
+    () => groups.filter(group => group.rows.some(row => !archivedIdSet.has(row.sessionId))),
+    [groups, archivedIdSet],
   )
 
   const restoreHiddenRows = (): void => {
@@ -683,7 +758,7 @@ export function SessionBranchList({
       setArchivedRowsVisible(current => current === nextArchivedRowsVisible ? current : nextArchivedRowsVisible)
 
       const nextHosts = new Map<SessionId, HTMLElement>()
-      for (const group of groups) {
+      for (const group of visibleGroups) {
         const sourceRow = rowById.get(group.sourceId)
         if (sourceRow === undefined || sourceRow.parentElement === null) continue
 
@@ -710,7 +785,7 @@ export function SessionBranchList({
       setHosts(current => sameHosts(current, nextHosts) ? current : nextHosts)
 
       const represented = new Set<SessionId>()
-      for (const group of groups) {
+      for (const group of visibleGroups) {
         // No source host means no replacement row. Keep its native children
         // reachable (e.g. when their source is archived or filtered out).
         if (!nextHosts.has(group.sourceId)) continue
@@ -734,7 +809,7 @@ export function SessionBranchList({
     rebuildRef.current = rebuild
     rebuild()
     return restoreHiddenRows
-  }, [groups, state, openSessionMenu, archives])
+  }, [visibleGroups, state, openSessionMenu, archives])
 
   useEffect(() => {
     if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return
@@ -758,7 +833,7 @@ export function SessionBranchList({
     hostsRef.current = new Map()
   }, [])
 
-  if (typeof document === 'undefined' || liveBranches === 0) return null
+  if (typeof document === 'undefined' || visibleGroups.length === 0) return null
 
   const toggle = (sessionId: SessionId): void => {
     setCollapsed(current => {
@@ -769,23 +844,34 @@ export function SessionBranchList({
     })
   }
 
+  const toggleMenu = (sessionId: SessionId): void => {
+    setOpenMenus(current => {
+      const next = new Set(current)
+      if (next.has(sessionId)) next.delete(sessionId)
+      else next.add(sessionId)
+      return next
+    })
+  }
+
   return (
     <>
-      {groups.map(group => {
+      {visibleGroups.map(group => {
+        if (group.rows.length === 0) return null
         const host = hosts.get(group.sourceId)
         if (host === undefined) return null
         return createPortal(
           <BranchMenu
             group={group}
-            expanded={!collapsed.has(group.sourceId)}
+            expanded={openMenus.has(group.sourceId)}
             collapsed={collapsed}
-            onToggle={toggle}
+            onToggle={toggleMenu}
+            onToggleRow={toggle}
             onOpen={openSession}
             openSessionMenu={openSessionMenu}
             archivedForks={archivedForks}
             allEntries={recordedEntries}
             titleOf={id => state.byId?.[id]?.displayTitle ?? id}
-            archivedIds={new Set(archives.archivedSessionIds)}
+            archivedIds={archivedIdSet}
             showArchived={archivedRowsVisible}
             unarchive={unarchive}
             t={t}

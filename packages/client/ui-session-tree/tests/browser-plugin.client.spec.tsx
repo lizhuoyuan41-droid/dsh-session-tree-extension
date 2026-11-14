@@ -42,13 +42,6 @@ interface TestEditor {
   setEditorState: (state: unknown) => void
 }
 
-function textFromEditorState(state: unknown): string {
-  const root = (state as { root?: { children?: Array<{ children?: Array<{ text?: string }> }> } }).root
-  return (root?.children ?? [])
-    .map(paragraph => (paragraph.children ?? []).map(child => child.text ?? '').join(''))
-    .join('\n')
-}
-
 interface TestSlotEntry {
   component: unknown
   options: Record<string, unknown>
@@ -279,7 +272,9 @@ describe('session tree browser plugin', () => {
       const lineage = ((b.branchEntry()?.inject) as unknown as () => { lineage: SessionForkLineage })().lineage
       expect(lineage.getSnapshot().get(sid('s1-fork-test'))?.parentId).toBe('s1')
       expect(b.refresh).toHaveBeenCalled()
-      expect(textFromEditorState(vi.mocked(childEditor.setEditorState).mock.calls[0]?.[0])).toBe('test')
+      // The old user prompt is never copied into the fresh fork's composer.
+      expect(childEditor.setEditorState).not.toHaveBeenCalled()
+      expect(b.drafts).toHaveBeenCalledWith('')
       host.remove()
     } finally {
       await b.fiber.dispose()
@@ -385,15 +380,13 @@ describe('session tree browser plugin', () => {
     expect(b.nativeFork).toHaveBeenCalledWith({ sessionId: sid('s1'), atSeq: 5, increaseTitle: true })
     expect(b.inputFor).toHaveBeenCalledWith(childCtx)
     expect(b.inputFor).not.toHaveBeenCalledWith(sourceCtx)
-    expect(b.drafts).not.toHaveBeenCalled()
+    // The fork starts blank: clear the child draft and do not replay the
+    // selected message into its editor.
+    expect(b.drafts).toHaveBeenCalledWith('')
     expect(sourceEditor.parseEditorState).not.toHaveBeenCalled()
     expect(sourceEditor.setEditorState).not.toHaveBeenCalled()
-    expect(childEditor.parseEditorState).toHaveBeenCalledTimes(1)
-    expect(childEditor.setEditorState).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(childEditor.setEditorState).mock.invocationCallOrder[0]).toBeLessThan(
-      b.open.mock.invocationCallOrder[0]!,
-    )
-    expect(textFromEditorState(vi.mocked(childEditor.setEditorState).mock.calls[0]?.[0])).toBe(prompt)
+    expect(childEditor.parseEditorState).not.toHaveBeenCalled()
+    expect(childEditor.setEditorState).not.toHaveBeenCalled()
     const lineage = ((b.branchEntry()?.inject) as unknown as () => { lineage: SessionForkLineage })().lineage
     expect(lineage.getSnapshot().get(childId)?.summary).toBe('previous prompt')
     expect(entries).toEqual(sourceEvents)
@@ -452,7 +445,7 @@ describe('session tree browser plugin', () => {
     expect(b.nativeFork).toHaveBeenCalledWith({ sessionId: sid('s1'), atSeq: 4, increaseTitle: true })
   })
 
-  it('seeds a custom panel fork through the child native editor', async () => {
+  it('reveals a custom panel fork with an empty composer', async () => {
     const childId = sid('s1-fork-test')
     const childCtx = {}
     const childEditor: TestEditor = {
@@ -468,11 +461,9 @@ describe('session tree browser plugin', () => {
     await actions.fork('n1', 'alt')
 
     expect(b.inputFor).toHaveBeenCalledWith(childCtx)
-    expect(b.drafts).not.toHaveBeenCalled()
-    expect(vi.mocked(childEditor.setEditorState).mock.invocationCallOrder[0]).toBeLessThan(
-      b.open.mock.invocationCallOrder[0]!,
-    )
-    expect(textFromEditorState(vi.mocked(childEditor.setEditorState).mock.calls[0]?.[0])).toBe('test')
+    // The remote fork returns `prompt: 'test'`, but the child composer must stay blank.
+    expect(b.drafts).toHaveBeenCalledWith('')
+    expect(childEditor.setEditorState).not.toHaveBeenCalled()
     expect(b.openedSessions).toEqual([childId])
     // A remote-created child is not addressable until the catalog refresh lands.
     expect(b.refresh).toHaveBeenCalled()
@@ -544,7 +535,7 @@ describe('session tree browser plugin', () => {
       { method: 'fork', args: ['s1', 'n1', 'alt'] },
     ])
     expect(b.inputFor).toHaveBeenCalledWith(childCtx)
-    expect(b.drafts).not.toHaveBeenCalled()
+    expect(b.drafts).toHaveBeenCalledWith('')
     expect(b.refresh).toHaveBeenCalled()
   })
 
@@ -1008,6 +999,21 @@ describe('session tree browser plugin', () => {
     expect(openSessionMenu).toHaveBeenCalledWith(childId, 'native-child', expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }))
     expect(openedBranches).toEqual([childId])
 
+    // Branch menus start collapsed after every page load/restart.
+    const defaultBody = document.querySelector('[data-session-tree-branch-body]')!
+    expect(defaultBody.getAttribute('data-expanded')).toBe('false')
+    expect(defaultBody.getAttribute('aria-hidden')).toBe('true')
+    expect(screen.queryByLabelText(`${zh['branch.menu.collapse']} - Source chat`)).toBeNull()
+
+    fireEvent.click(screen.getByLabelText(`${zh['branch.menu.expand']} - Source chat`))
+    const expandedBody = document.querySelector('[data-session-tree-branch-body]')!
+    expect(expandedBody.getAttribute('data-expanded')).toBe('true')
+    // The transition duration follows the measured content height, never the
+    // fixed 160 ms that made long menus snap shut.
+    const duration = expandedBody.style.getPropertyValue('--branch-collapse-duration')
+    expect(duration).toMatch(/^\d+ms$/u)
+    expect(Number.parseInt(duration, 10)).toBeGreaterThanOrEqual(200)
+
     fireEvent.click(screen.getByLabelText(`${zh['branch.menu.collapse']} - Source chat`))
     // Collapse keeps the rows mounted for the height transition and makes the
     // body inert/aria-hidden instead of unmounting it.
@@ -1055,7 +1061,7 @@ describe('session tree browser plugin', () => {
     expect(document.querySelector('[data-session-tree-branch-host]')).toBeNull()
   })
 
-  it('follows the native archived filter in the inline fork menu', async () => {
+  it('drops the branch menu when its only fork is archived', async () => {
     const sourceId = sid('filter-s1')
     const childId = sid('filter-child')
     const lineage = new SessionForkLineage()
@@ -1100,23 +1106,82 @@ describe('session tree browser plugin', () => {
       />,
     )
     await screen.findByLabelText(`${zh['branch.node.open']} - archived child`)
+    await waitFor(() => {
+      expect(document.querySelector(`[data-session-tree-branch-menu="${sourceId}"]`)).not.toBeNull()
+    })
 
-    // Default filter: the host removes the archived row, so the branch menu
-    // must not show its archived entry either.
+    // Default filter: the archived row leaves the native list and the branch
+    // menu loses its last live fork, so header, count and placeholder all go.
     await act(async () => {
       archiveSnapshot = { archivedSessionIds: [childId] }
       for (const listener of archiveListeners) listener()
       native.setRows([rows[0]!])
     })
     await waitFor(() => {
-      expect(document.querySelector('[data-session-tree-branch-host]')).not.toBeNull()
+      expect(document.querySelector('[data-session-tree-branch-host]')).toBeNull()
     })
+    expect(document.querySelector(`[data-session-tree-branch-menu="${sourceId}"]`)).toBeNull()
+    expect(screen.queryByText(`x0`)).toBeNull()
     expect(screen.queryByLabelText(`${zh['branch.archived.restore']} - Source chat · archived prompt`)).toBeNull()
 
-    // "Show archived": the host renders the archived row again, so the menu may
-    // surface the restore entry.
+    // "Show archived": the native archived row returns; the branch menu must
+    // stay hidden because there is still no live fork. Restoring stays native.
     await act(async () => { native.setRows(rows) })
-    await screen.findByLabelText(`${zh['branch.archived.restore']} - Source chat · archived prompt`)
+    expect(document.querySelector(`[data-session-tree-branch-menu="${sourceId}"]`)).toBeNull()
+    expect(native.row(childId).style.display).toBe('')
+    expect(screen.queryByLabelText(`${zh['branch.archived.restore']} - Source chat · archived prompt`)).toBeNull()
+  })
+
+  it('shows the Host completion reminder on rows and the collapsed header', async () => {
+    const source = sid('done-s1')
+    const child = sid('done-child')
+    const lineage = new SessionForkLineage()
+    lineage.record({ childId: child, parentId: source, summary: 'finished fork' })
+    const state = fakeListState([source, child], Object.fromEntries([
+      fakeRow(source, 'Source chat'),
+      fakeRow(child, 'Child chat', source),
+    ]), source)
+    let statusMap = new Map<SessionId, { running: boolean; pendingInteraction: undefined; completionUnread: boolean }>([
+      [child, { running: false, pendingInteraction: undefined, completionUnread: true }],
+    ])
+    const useSessionStatus = (<T,>(select: (value: typeof statusMap) => T): T => select(statusMap))
+    const useSessions = (<T,>(select: (value: typeof state) => T): T => select(state))
+    renderNativeSessionRows([
+      { id: source, title: 'Source chat' },
+      { id: child, title: 'Child chat' },
+    ])
+    const Menu = SessionBranchList as unknown as ComponentType<Record<string, unknown>>
+    const view = render(
+      <Menu
+        lineage={lineage}
+        openSession={vi.fn()}
+        useSessions={useSessions}
+        useSessionStatus={useSessionStatus}
+        t={t}
+      />,
+    )
+
+    await waitFor(() => {
+      const row = document.querySelector(`[data-branch-session-id="${child}"]`)
+      expect(row?.querySelector('[data-branch-completed="true"]')).not.toBeNull()
+    })
+    // The menu is collapsed by default, so the header carries the same reminder.
+    expect(document.querySelector('[data-session-tree-branch-menu] [data-branch-menu-completed]')).not.toBeNull()
+
+    statusMap = new Map([[child, { running: false, pendingInteraction: undefined, completionUnread: false }]])
+    view.rerender(
+      <Menu
+        lineage={lineage}
+        openSession={vi.fn()}
+        useSessions={useSessions}
+        useSessionStatus={useSessionStatus}
+        t={t}
+      />,
+    )
+    await waitFor(() => {
+      expect(document.querySelector('[data-branch-completed="true"]')).toBeNull()
+    })
+    expect(document.querySelector('[data-branch-menu-completed]')).toBeNull()
   })
 
   it('rebuilds the inline fork list from native child ids without stored lineage', async () => {
@@ -1290,6 +1355,10 @@ describe('session tree browser plugin', () => {
     fireEvent.click(screen.getByLabelText(`${zh['node.expand']} - c1`))
     expect(document.querySelector(`[data-session-tree-branch-body][data-branch-parent="${sid('c1')}"]`)?.getAttribute('data-expanded')).toBe('true')
 
+    // The menu header starts collapsed; opening it is a separate toggle from
+    // the per-row expanders above.
+    fireEvent.click(screen.getByLabelText(`${zh['branch.menu.expand']} - Source chat`))
+    expect(document.querySelector('[data-session-tree-branch-body]')?.getAttribute('data-expanded')).toBe('true')
     fireEvent.click(screen.getByLabelText(`${zh['branch.menu.collapse']} - Source chat`))
     const collapsedNestedBody = document.querySelector('[data-session-tree-branch-body]')!
     expect(collapsedNestedBody.getAttribute('data-expanded')).toBe('false')
@@ -1353,9 +1422,13 @@ describe('session tree browser plugin', () => {
     await waitFor(() => {
       expect(document.querySelector(`[data-session-tree-branch-menu="${source}"]`)).not.toBeNull()
     })
-    fireEvent.click(screen.getByLabelText(`${zh['branch.menu.collapse']} - Source chat`))
     const body = (): HTMLElement | null =>
       document.querySelector<HTMLElement>(`[data-session-tree-branch-menu="${source}"] [data-session-tree-branch-body]`)
+    // Default collapsed; open it, then collapse it explicitly.
+    expect(body()?.getAttribute('data-expanded')).toBe('false')
+    fireEvent.click(screen.getByLabelText(`${zh['branch.menu.expand']} - Source chat`))
+    expect(body()?.getAttribute('data-expanded')).toBe('true')
+    fireEvent.click(screen.getByLabelText(`${zh['branch.menu.collapse']} - Source chat`))
     expect(body()?.getAttribute('data-expanded')).toBe('false')
 
     // A new fork under a different source must not reset other menus.

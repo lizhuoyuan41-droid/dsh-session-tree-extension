@@ -20,7 +20,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 import type { SessionTreeForkView, SessionTreeView, TreeNode } from '@ryanlee2007/dsh-pi-agent-session-tree/client'
-import { nodeFullText, isInjectedUserSource } from './node-text.ts'
+import { isInjectedUserSource } from './node-text.ts'
 import { SessionForkLineage, browserForkLineageStorage, summarizeForkPrompt } from './fork-lineage.ts'
 import type { SessionTreePanelActions } from './slots.ts'
 import { SessionTreeDock } from './SessionTreePanel.tsx'
@@ -67,15 +67,6 @@ const NS = 'session-tree'
 // and then reading it, even when the service is present.
 export const inject = ['slots', 'sessions', 'conversation', 'remote', 'locale', 'layout']
 
-/** Runtime-only editor face exposed by the native SessionInput shell. */
-interface NativeSessionInput {
-  readonly editor?: {
-    parseEditorState(value: unknown): unknown
-    setEditorState(state: unknown): void
-    getRootElement?(): HTMLElement | null
-  }
-}
-
 interface SessionTreeLayoutActions {
   readonly openDetails?: (panel?: string) => void
   readonly openRightbar?: (track: boolean, fullscreen: boolean) => void
@@ -109,38 +100,14 @@ function openSessionTreePanel(ctx: ClientContext, layout: SessionTreeLayoutActio
   layout.openRightbar?.(true, false)
 }
 
-/** Build the serialized Lexical state used to seed one native composer. */
-function editorStateForText(text: string): unknown {
-  return {
-    root: {
-      children: text.split('\n').map(line => ({
-        children: line === ''
-          ? []
-          : [{
-              detail: 0,
-              format: 0,
-              mode: 'normal',
-              style: '',
-              text: line,
-              type: 'text',
-              version: 1,
-            }],
-        direction: null,
-        format: '',
-        indent: 0,
-        textFormat: 0,
-        textStyle: '',
-        type: 'paragraph',
-        version: 1,
-      })),
-      direction: null,
-      format: '',
-      indent: 0,
-      textFormat: 0,
-      textStyle: '',
-      type: 'root',
-      version: 1,
-    },
+/** Clear the child composer so a fresh fork never inherits an old prompt. */
+function clearNativePrompt(ctx: ClientContext, sessionId: SessionId): void {
+  const binding = ctx.sessions.binding(sessionId)
+  if (binding === undefined) return
+  try {
+    ctx.conversation.input.for(binding.ctx).setDraft('')
+  } catch {
+    // The composer may not have mounted yet; a new child has no stored draft.
   }
 }
 
@@ -157,30 +124,15 @@ function registerSessionTreeUi(ctx: ClientContext): void {
   const forkLineage = new SessionForkLineage(browserForkLineageStorage())
   ctx.effect(() => () => { forkLineage.dispose() }, 'ui-session-tree: fork lineage')
 
-  /** Write a fork prompt through the child Session's native editor instance. */
-  const writeNativePrompt = (sessionId: SessionId, text: string): void => {
-    const binding = ctx.sessions.binding(sessionId)
-    if (binding === undefined) throw new Error('fork child is not addressable')
-    const input = ctx.conversation.input.for(binding.ctx) as unknown as NativeSessionInput
-    const editor = input.editor
-    if (editor === undefined) throw new Error('fork child native input editor is unavailable')
-    editor.setEditorState(editor.parseEditorState(editorStateForText(text)))
-  }
-
-  /** Seed the new fork's native composer before revealing it. */
+  /** Reveal a fresh fork with an empty composer; never seed an old prompt. */
   const completeFork = async (result: SessionTreeForkView): Promise<void> => {
     const childId = result.sessionId
     if (childId === undefined) return
     // A remote-created child is not retained by the Client yet. Refresh its
-    // catalog row and hold a binding while preparing the native composer.
+    // catalog row and hold a binding while clearing the native composer.
     if (typeof ctx.sessions.refresh === 'function') await ctx.sessions.refresh()
     const prepare = (): void => {
-      try {
-        if (result.prompt !== undefined) writeNativePrompt(childId, result.prompt)
-      } catch {
-        // The composer seed is best-effort: never block revealing a fork whose
-        // binding is still settling after the catalog refresh.
-      }
+      clearNativePrompt(ctx, childId)
       revealSession(ctx, childId)
     }
     if (typeof ctx.sessions.using === 'function') {
@@ -209,7 +161,7 @@ function registerSessionTreeUi(ctx: ClientContext): void {
 
   /**
    * Restore the native fork to the completed turn immediately before the
-   * selected user message, then seed the child composer with that message.
+   * selected user message, then reveal it with an empty composer.
    */
   const forkUserPrompt = async (sessionId: SessionId, node: TreeNode): Promise<void> => {
     const selectedSeq = node.metadata?.sessionEventSeq
@@ -270,7 +222,7 @@ function registerSessionTreeUi(ctx: ClientContext): void {
       parentId: sessionId,
       ...(previousUserPrompt === undefined ? {} : { summary: summarizeForkPrompt(previousUserPrompt) }),
     })
-    writeNativePrompt(childId, nodeFullText(node))
+    clearNativePrompt(ctx, childId)
     revealSession(ctx, childId)
     overlay.closeSelector()
   }

@@ -22,7 +22,9 @@
   min-width: 0;
   grid-template-rows: 0fr;
   overflow-x: hidden;
-  transition: grid-template-rows .16s cubic-bezier(.4, 0, .2, 1);
+  /* The component overrides this variable from the measured content height so
+     tall menus travel at the same visual speed instead of snapping shut. */
+  transition: grid-template-rows var(--branch-collapse-duration, .16s) cubic-bezier(.4, 0, .2, 1);
 }
 .menuBody[data-expanded='true'] { grid-template-rows: 1fr; }
 .menuList {
@@ -37,12 +39,12 @@
   overflow: hidden;
   opacity: 0;
   visibility: hidden;
-  transition: opacity .16s cubic-bezier(.4, 0, .2, 1), visibility 0s .16s;
+  transition: opacity var(--branch-collapse-duration, .16s) cubic-bezier(.4, 0, .2, 1), visibility 0s var(--branch-collapse-duration, .16s);
 }
 .menuBody[data-expanded='true'] .menuList {
   opacity: 1;
   visibility: visible;
-  transition: opacity .16s cubic-bezier(.4, 0, .2, 1), visibility 0s;
+  transition: opacity var(--branch-collapse-duration, .16s) cubic-bezier(.4, 0, .2, 1), visibility 0s;
 }
 @media (prefers-reduced-motion: reduce) {
   .menuBody,
@@ -243,6 +245,14 @@
   border-radius: 50%;
   background: var(--dsw-alias-state-business-primary);
   animation: branch-menu-pulse 1.4s ease-in-out infinite;
+}
+/* Finished background fork: the same green reminder the native list shows. */
+.completedDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
 }
 @keyframes branch-menu-pulse {
   0%, 100% { opacity: .35; }
