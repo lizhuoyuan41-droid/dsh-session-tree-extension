@@ -1254,22 +1254,37 @@ describe('session tree browser plugin', () => {
     }
   })
 
-  it('disables scroll anchoring only for the fold duration', () => {
+  it('disables scroll anchoring on the sidebar scroller, never on the menu itself', () => {
     vi.useFakeTimers()
+    const setSizes = (element: HTMLElement, scrollHeight: number, clientHeight: number): void => {
+      Object.defineProperty(element, 'scrollHeight', { configurable: true, value: scrollHeight })
+      Object.defineProperty(element, 'clientHeight', { configurable: true, value: clientHeight })
+    }
     try {
       const scroller = document.createElement('div')
       scroller.style.overflowY = 'auto'
+      setSizes(scroller, 900, 300)
+      // The menu clips horizontally, so its computed overflow-y can be auto; it
+      // must never be mistaken for the list scroller.
+      const host = document.createElement('div')
+      host.setAttribute('data-session-tree-branch-host', 'mounted')
       const menu = document.createElement('div')
-      scroller.append(menu)
+      menu.style.overflowY = 'auto'
+      setSizes(menu, 400, 100)
+      scroller.append(host)
+      host.append(menu)
       document.body.append(scroller)
 
       holdScrollAnchorDuring(menu, 300)
       expect(scroller.style.overflowAnchor).toBe('none')
+      expect(menu.style.overflowAnchor).toBe('')
       vi.advanceTimersByTime(359)
       expect(scroller.style.overflowAnchor).toBe('none')
       vi.advanceTimersByTime(1)
       expect(scroller.style.overflowAnchor).toBe('')
 
+      // A second fold before the first restores must keep anchoring disabled
+      // until the latest fold ends.
       holdScrollAnchorDuring(menu, 200)
       holdScrollAnchorDuring(menu, 200)
       vi.advanceTimersByTime(259)

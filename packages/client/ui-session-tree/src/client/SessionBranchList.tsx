@@ -724,6 +724,8 @@ export function SessionBranchList({
   const [archivedRowsVisible, setArchivedRowsVisible] = useState(false)
   const hostsRef = useRef<ReadonlyMap<SessionId, HTMLElement>>(hosts)
   const hiddenRows = useRef(new Map<HTMLElement, HiddenRow>())
+  const compensations = useRef(new Map<HTMLElement, Animation>())
+  const compensationFrame = useRef(0)
   const matchedRows = useRef(new WeakMap<HTMLElement, SessionId>())
   const rebuildRef = useRef<() => void>(() => {})
 
@@ -771,9 +773,50 @@ export function SessionBranchList({
     hiddenRows.current.clear()
   }
 
+  /**
+   * Native row movement is measured by the Workspace list before this plugin
+   * inserts a menu or hides the original fork row. Replay that movement after
+   * the next frame, when the portals have mounted and the layout is final, so
+   * rows continue from their visible position instead of the stale target.
+   */
+  const scheduleRowCompensation = (rows: readonly HTMLElement[]): void => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return
+    if (compensationFrame.current !== 0) window.cancelAnimationFrame(compensationFrame.current)
+    compensationFrame.current = window.requestAnimationFrame(() => {
+      compensationFrame.current = 0
+      for (const row of rows) {
+        if (!row.isConnected || row.style.display === 'none') continue
+        if (typeof row.animate !== 'function') continue
+        const visual = row.getBoundingClientRect()
+        const opacity = Number(window.getComputedStyle(row).opacity)
+        if (typeof row.getAnimations === 'function') {
+          for (const animation of row.getAnimations()) animation.cancel()
+        }
+        compensations.current.delete(row)
+        const layout = row.getBoundingClientRect()
+        const dx = visual.left - layout.left
+        const dy = visual.top - layout.top
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue
+        const playback = row.animate(
+          [
+            {
+              transform: `translate(${dx}px, ${dy}px)`,
+              opacity: Number.isFinite(opacity) ? opacity : 1,
+            },
+            { transform: 'translate(0, 0)', opacity: 1 },
+          ],
+          { duration: 200, easing: 'ease-out' },
+        )
+        compensations.current.set(row, playback)
+        playback.onfinish = () => {
+          if (compensations.current.get(row) === playback) compensations.current.delete(row)
+        }
+      }
+    })
+  }
+
   useLayoutEffect(() => {
     const rebuild = (): void => {
-      restoreHiddenRows()
       const rows = nativeSessionRows()
       // Prefer the native row key (`session:<id>`): title/order pairing breaks
       // when a workspace collapses and re-renders rows with duplicate titles.
@@ -792,11 +835,64 @@ export function SessionBranchList({
       const nextArchivedRowsVisible = archives.archivedSessionIds.some(id => rowById.has(id))
       setArchivedRowsVisible(current => current === nextArchivedRowsVisible ? current : nextArchivedRowsVisible)
 
-      const nextHosts = new Map<SessionId, HTMLElement>()
+      const hostSessions = new Set<SessionId>()
       for (const group of visibleGroups) {
         const sourceRow = rowById.get(group.sourceId)
-        if (sourceRow === undefined || sourceRow.parentElement === null) continue
+        if (sourceRow !== undefined && sourceRow.parentElement !== null) hostSessions.add(group.sourceId)
+      }
+      const represented = new Set<SessionId>()
+      if (openSessionMenu !== undefined) {
+        for (const group of visibleGroups) {
+          if (!hostSessions.has(group.sourceId)) continue
+          for (const row of group.rows) {
+            if (archives.archivedSessionIds.includes(row.sessionId)) continue
+            represented.add(row.sessionId)
+          }
+        }
+      }
 
+      // Do nothing unless the plugin layout itself changes; unrelated native
+      // re-renders must keep their own animations untouched.
+      let changed = hostsRef.current.size !== hostSessions.size
+      if (!changed) {
+        for (const [sourceId, host] of hostsRef.current) {
+          const sourceRow = rowById.get(sourceId)
+          if (
+            sourceRow === undefined
+            || host.parentElement !== sourceRow.parentElement
+            || host.previousElementSibling !== sourceRow
+          ) {
+            changed = true
+            break
+          }
+        }
+      }
+      if (!changed) {
+        const currentHidden = new Set<SessionId>()
+        for (const [row, hidden] of hiddenRows.current) {
+          if (row.isConnected) currentHidden.add(hidden.sessionId)
+        }
+        changed = currentHidden.size !== represented.size
+        if (!changed) {
+          for (const id of represented) {
+            const row = rowById.get(id)
+            if (row === undefined || row.style.display !== 'none') {
+              changed = true
+              break
+            }
+          }
+        }
+      }
+      if (!changed) return
+
+      restoreHiddenRows()
+
+      const nextHosts = new Map<SessionId, HTMLElement>()
+      for (const group of visibleGroups) {
+        if (!hostSessions.has(group.sourceId)) continue
+        const sourceRow = rowById.get(group.sourceId)
+        const parent = sourceRow?.parentElement
+        if (sourceRow === undefined || parent === null || parent === undefined) continue
         let host = hostsRef.current.get(group.sourceId)
         if (host === undefined) {
           host = document.createElement('div')
@@ -807,10 +903,10 @@ export function SessionBranchList({
         // Every menu, including an archived-only one, belongs directly under
         // its own parent Session row.
         if (
-          host.parentElement !== sourceRow.parentElement
+          host.parentElement !== parent
           || host.previousElementSibling !== sourceRow
         ) {
-          sourceRow.parentElement.insertBefore(host, sourceRow.nextSibling)
+          parent.insertBefore(host, sourceRow.nextSibling)
         }
         nextHosts.set(group.sourceId, host)
       }
@@ -821,16 +917,6 @@ export function SessionBranchList({
       hostsRef.current = nextHosts
       setHosts(current => sameHosts(current, nextHosts) ? current : nextHosts)
 
-      const represented = new Set<SessionId>()
-      for (const group of visibleGroups) {
-        // No source host means no replacement row. Keep its native children
-        // reachable (e.g. when their source is archived or filtered out).
-        if (!nextHosts.has(group.sourceId)) continue
-        for (const row of group.rows) {
-          if (archives.archivedSessionIds.includes(row.sessionId)) continue
-          represented.add(row.sessionId)
-        }
-      }
       for (const id of represented) {
         if (openSessionMenu === undefined) continue
         const row = rowById.get(id)
@@ -841,6 +927,8 @@ export function SessionBranchList({
         row.setAttribute(PREVIOUS_DISPLAY_ATTRIBUTE, display)
         row.style.display = 'none'
       }
+
+      scheduleRowCompensation(rows)
     }
 
     rebuildRef.current = rebuild
@@ -865,6 +953,10 @@ export function SessionBranchList({
   }, [])
 
   useLayoutEffect(() => () => {
+    if (compensationFrame.current !== 0) window.cancelAnimationFrame(compensationFrame.current)
+    compensationFrame.current = 0
+    for (const animation of compensations.current.values()) animation.cancel()
+    compensations.current.clear()
     restoreHiddenRows()
     for (const host of hostsRef.current.values()) host.remove()
     hostsRef.current = new Map()
