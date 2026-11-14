@@ -28,6 +28,7 @@ import { currentSessionId } from './session-list.ts'
 import { branchTopics, subscribeBranchTopics, type BranchTopic } from './branch-topic.ts'
 import { branchMenusSnapshot, subscribeBranchMenus, toggleBranchMenu, branchMenuDuration } from './branch-menu-state.ts'
 import { holdScrollAnchorDuring } from './scroll-anchor.ts'
+import { installWorkspaceMotion } from './workspace-motion.ts'
 
 type OpenSessionMenu = (sessionId: SessionId, displayTitle: string, point: { x: number; y: number }) => void
 interface ArchiveState { readonly archivedSessionIds: readonly SessionId[] }
@@ -724,8 +725,6 @@ export function SessionBranchList({
   const [archivedRowsVisible, setArchivedRowsVisible] = useState(false)
   const hostsRef = useRef<ReadonlyMap<SessionId, HTMLElement>>(hosts)
   const hiddenRows = useRef(new Map<HTMLElement, HiddenRow>())
-  const compensations = useRef(new Map<HTMLElement, Animation>())
-  const compensationFrame = useRef(0)
   const matchedRows = useRef(new WeakMap<HTMLElement, SessionId>())
   const rebuildRef = useRef<() => void>(() => {})
 
@@ -773,47 +772,7 @@ export function SessionBranchList({
     hiddenRows.current.clear()
   }
 
-  /**
-   * Native row movement is measured by the Workspace list before this plugin
-   * inserts a menu or hides the original fork row. Replay that movement after
-   * the next frame, when the portals have mounted and the layout is final, so
-   * rows continue from their visible position instead of the stale target.
-   */
-  const scheduleRowCompensation = (rows: readonly HTMLElement[]): void => {
-    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return
-    if (compensationFrame.current !== 0) window.cancelAnimationFrame(compensationFrame.current)
-    compensationFrame.current = window.requestAnimationFrame(() => {
-      compensationFrame.current = 0
-      for (const row of rows) {
-        if (!row.isConnected || row.style.display === 'none') continue
-        if (typeof row.animate !== 'function') continue
-        const visual = row.getBoundingClientRect()
-        const opacity = Number(window.getComputedStyle(row).opacity)
-        if (typeof row.getAnimations === 'function') {
-          for (const animation of row.getAnimations()) animation.cancel()
-        }
-        compensations.current.delete(row)
-        const layout = row.getBoundingClientRect()
-        const dx = visual.left - layout.left
-        const dy = visual.top - layout.top
-        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue
-        const playback = row.animate(
-          [
-            {
-              transform: `translate(${dx}px, ${dy}px)`,
-              opacity: Number.isFinite(opacity) ? opacity : 1,
-            },
-            { transform: 'translate(0, 0)', opacity: 1 },
-          ],
-          { duration: 200, easing: 'ease-out' },
-        )
-        compensations.current.set(row, playback)
-        playback.onfinish = () => {
-          if (compensations.current.get(row) === playback) compensations.current.delete(row)
-        }
-      }
-    })
-  }
+  useEffect(() => installWorkspaceMotion(document), [])
 
   useLayoutEffect(() => {
     const rebuild = (): void => {
@@ -928,7 +887,6 @@ export function SessionBranchList({
         row.style.display = 'none'
       }
 
-      scheduleRowCompensation(rows)
     }
 
     rebuildRef.current = rebuild
@@ -953,10 +911,6 @@ export function SessionBranchList({
   }, [])
 
   useLayoutEffect(() => () => {
-    if (compensationFrame.current !== 0) window.cancelAnimationFrame(compensationFrame.current)
-    compensationFrame.current = 0
-    for (const animation of compensations.current.values()) animation.cancel()
-    compensations.current.clear()
     restoreHiddenRows()
     for (const host of hostsRef.current.values()) host.remove()
     hostsRef.current = new Map()

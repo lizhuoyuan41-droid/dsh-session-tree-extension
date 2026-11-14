@@ -17,11 +17,12 @@
   real sidebar scroller (never on the menu's own clipped container, which the
   previous detection mistook for it), so a tall menu cannot be pinned by the
   list below it.
-- Native workspace and session expansions animate rows with coordinates
-  measured before this plugin inserts its menus or hides the original fork
-  rows. After any such plugin layout change, the affected rows are replayed
-  from their visible position to the new final layout, so the movement no
-  longer starts from a stale offset.
+- Workspace toggles snapshot visible native rows before the click is handled.
+  Existing rows move from that snapshot to the updated layout; newly shown
+  sessions fade at their final position instead of translating from a stale
+  viewport origin. Zero-sized hidden rows are excluded from the snapshot.
+  This replaces the late post-layout replay, which could retain the incorrect
+  starting offset and cancel unrelated animations.
 - A new fork opens with an empty composer. The selected or previous user
   prompt is no longer replayed into the child Session's editor.
 - Finished background forks show the Host's green completion dot; while the
