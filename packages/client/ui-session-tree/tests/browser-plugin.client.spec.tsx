@@ -18,11 +18,12 @@ import { buildBranchTreeModel, buildSessionGraphModel } from '../src/client/sess
 import { SessionForkLineage, FORK_LINEAGE_STORAGE_KEY } from '../src/client/fork-lineage.ts'
 import { apply, inject } from '../src/client/index.ts'
 import { rememberBranchTopic, resetBranchTopicsForTests } from '../src/client/branch-topic.ts'
+import { resetBranchMenus } from '../src/client/branch-menu-state.ts'
 import { resetFocusKeyForTests } from '../src/client/focus-store.ts'
 import type { SessionTreePanelActions } from '../src/client/slots.ts'
 
 afterEach(cleanup)
-afterEach(() => { resetBranchTopicsForTests(); resetFocusKeyForTests() })
+afterEach(() => { resetBranchTopicsForTests(); resetFocusKeyForTests(); resetBranchMenus() })
 const sid = (value: string): SessionId => value as SessionId
 const t = (key: string): string => zh[key as keyof typeof zh] ?? key
 function node(nodeId: string, parentId: string | null, summary: string, branch = 'main'): TreeNode {
@@ -1061,7 +1062,7 @@ describe('session tree browser plugin', () => {
     expect(document.querySelector('[data-session-tree-branch-host]')).toBeNull()
   })
 
-  it('drops the branch menu when its only fork is archived', async () => {
+  it('keeps the archived-only menu out of the hide-archived filter', async () => {
     const sourceId = sid('filter-s1')
     const childId = sid('filter-child')
     const lineage = new SessionForkLineage()
@@ -1124,12 +1125,73 @@ describe('session tree browser plugin', () => {
     expect(screen.queryByText(`x0`)).toBeNull()
     expect(screen.queryByLabelText(`${zh['branch.archived.restore']} - Source chat · archived prompt`)).toBeNull()
 
-    // "Show archived": the native archived row returns; the branch menu must
-    // stay hidden because there is still no live fork. Restoring stays native.
+    // "Show archived": the native archived row returns, so the menu returns as
+    // the restore entry. It has a header but no misleading `x0` count.
     await act(async () => { native.setRows(rows) })
-    expect(document.querySelector(`[data-session-tree-branch-menu="${sourceId}"]`)).toBeNull()
+    await waitFor(() => {
+      expect(document.querySelector(`[data-session-tree-branch-menu="${sourceId}"]`)).not.toBeNull()
+    })
     expect(native.row(childId).style.display).toBe('')
-    expect(screen.queryByLabelText(`${zh['branch.archived.restore']} - Source chat · archived prompt`)).toBeNull()
+    expect(document.querySelector(`[data-session-tree-branch-menu="${sourceId}"]`)?.textContent).toContain(
+      zh['branch.menu.title'],
+    )
+    expect(screen.queryByText('x0')).toBeNull()
+    await screen.findByLabelText(`${zh['branch.archived.restore']} - Source chat · archived prompt`)
+  })
+
+  it('shows the archived-only menu under the archived-only filter and hides it when archived rows are hidden', async () => {
+    const sourceId = sid('only-s1')
+    const childId = sid('only-child')
+    const lineage = new SessionForkLineage()
+    lineage.record({ childId, parentId: sourceId, summary: 'only archived', createdAt: 3 })
+    const state = fakeListState(
+      [sourceId, childId],
+      Object.fromEntries([
+        fakeRow(sourceId, 'Archived source'),
+        fakeRow(childId, 'Archived child', sourceId),
+      ]),
+      sourceId,
+    )
+    const useSessions = (<T,>(select: (value: typeof state) => T): T => select(state))
+    let archiveSnapshot = { archivedSessionIds: [sourceId, childId] as SessionId[] }
+    const archiveListeners = new Set<() => void>()
+    const archiveSource = {
+      getSnapshot: () => archiveSnapshot,
+      subscribe: (listener: () => void) => { archiveListeners.add(listener); return () => { archiveListeners.delete(listener) } },
+    }
+    const rows = [
+      { id: sourceId, title: 'Archived source', selected: false },
+      { id: childId, title: 'Archived child', selected: false },
+    ]
+    const native = renderNativeSessionRows(rows)
+    const Menu = SessionBranchList as unknown as ComponentType<Record<string, unknown>>
+    render(
+      <Menu
+        lineage={lineage}
+        openSession={vi.fn()}
+        openSessionMenu={vi.fn()}
+        archiveSource={archiveSource}
+        unarchive={vi.fn()}
+        useSessions={useSessions}
+        t={t}
+      />,
+    )
+    // "Archived only" renders the archived source and child rows.
+    await waitFor(() => {
+      expect(document.querySelector(`[data-session-tree-branch-menu="${sourceId}"]`)).not.toBeNull()
+    })
+    expect(screen.queryByText('x0')).toBeNull()
+    await screen.findByLabelText(`${zh['branch.archived.restore']} - Archived source · only archived`)
+
+    // Switching back to "hide archived" removes the anchor row entirely.
+    await act(async () => {
+      native.setRows([])
+      archiveSnapshot = { archivedSessionIds: [sourceId, childId] }
+      for (const listener of archiveListeners) listener()
+    })
+    await waitFor(() => {
+      expect(document.querySelector(`[data-session-tree-branch-menu="${sourceId}"]`)).toBeNull()
+    })
   })
 
   it('shows the Host completion reminder on rows and the collapsed header', async () => {
@@ -1443,6 +1505,54 @@ describe('session tree browser plugin', () => {
     await waitFor(() => {
       expect(document.querySelector(`[data-session-tree-branch-menu="${other}"]`)).not.toBeNull()
     })
+    expect(body()?.getAttribute('data-expanded')).toBe('false')
+  })
+
+  it('keeps an opened menu across a workspace remount and only resets on a host restart', async () => {
+    const source = sid('persist-s1')
+    const child = sid('persist-child')
+    const lineage = new SessionForkLineage()
+    lineage.record({ childId: child, parentId: source, summary: 'persist fork' })
+    const state = fakeListState([source, child], Object.fromEntries([
+      fakeRow(source, 'Source chat'),
+      fakeRow(child, 'Child chat', source),
+    ]), source)
+    const useSessions = (<T,>(select: (value: typeof state) => T): T => select(state))
+    const native = renderNativeSessionRows([
+      { id: source, title: 'Source chat' },
+      { id: child, title: 'Child chat' },
+    ])
+    const Menu = SessionBranchList as unknown as ComponentType<Record<string, unknown>>
+    const first = render(<Menu lineage={lineage} openSession={vi.fn()} useSessions={useSessions} t={t} />)
+    await waitFor(() => {
+      expect(document.querySelector(`[data-session-tree-branch-menu="${source}"] [data-session-tree-branch-body]`)).not.toBeNull()
+    })
+    const body = (): HTMLElement | null =>
+      document.querySelector<HTMLElement>(`[data-session-tree-branch-menu="${source}"] [data-session-tree-branch-body]`)
+    expect(body()?.getAttribute('data-expanded')).toBe('false')
+    fireEvent.click(screen.getByLabelText(`${zh['branch.menu.expand']} - Source chat`))
+    expect(body()?.getAttribute('data-expanded')).toBe('true')
+
+    // Collapsing the workspace removes the native rows and unmounts the portal.
+    await act(async () => { native.setRows([]) })
+    await waitFor(() => { expect(document.querySelector('[data-session-tree-branch-host]')).toBeNull() })
+    first.unmount()
+
+    // Re-expanding the workspace mounts a fresh component; the opened menu is
+    // restored from the page-process store instead of defaulting to collapsed.
+    await act(async () => {
+      native.setRows([
+        { id: source, title: 'Source chat' },
+        { id: child, title: 'Child chat' },
+      ])
+    })
+    render(<Menu lineage={lineage} openSession={vi.fn()} useSessions={useSessions} t={t} />)
+    await waitFor(() => {
+      expect(body()?.getAttribute('data-expanded')).toBe('true')
+    })
+
+    // A host restart loads a fresh module store: every menu is collapsed again.
+    await act(async () => { resetBranchMenus() })
     expect(body()?.getAttribute('data-expanded')).toBe('false')
   })
 

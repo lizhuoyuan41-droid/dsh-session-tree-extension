@@ -26,6 +26,7 @@ import type { ForkLineageEntry, SessionForkLineage } from './fork-lineage.ts'
 import css from './SessionBranchList.module.css'
 import { currentSessionId } from './session-list.ts'
 import { branchTopics, subscribeBranchTopics, type BranchTopic } from './branch-topic.ts'
+import { branchMenusSnapshot, subscribeBranchMenus, toggleBranchMenu } from './branch-menu-state.ts'
 
 type OpenSessionMenu = (sessionId: SessionId, displayTitle: string, point: { x: number; y: number }) => void
 interface ArchiveState { readonly archivedSessionIds: readonly SessionId[] }
@@ -514,9 +515,9 @@ function BranchMenu({
     return { nodes, next: index }
   }
   const tree = renderRows(0, activeRows[0]?.depth ?? 1)
-  // No live forks means no header, count or placeholder at all. Restoring an
-  // archived-only fork stays with the native archived list.
-  if (activeRows.length === 0) return null
+  // No live forks means no header at all — unless the native list is showing
+  // archived rows, where the menu must remain as the restore entry.
+  if (activeRows.length === 0 && !(showArchived && restoredCount > 0)) return null
   return (
     <ul className={css.menu} data-session-tree-branch-menu={group.sourceId}>
       <li className={css.menuHeaderItem}>
@@ -532,9 +533,11 @@ function BranchMenu({
             <path d="M3.8 1.8 9.4 6l-5.6 4.2Z" fill="currentColor" />
           </svg>
           <span className={css.menuTitle}>{t('branch.menu.title')}</span>
-          <span className={css.countChip} aria-label={`${activeRows.length} ${t('branch.tree.count')}`}>
-            x{activeRows.length}
-          </span>
+          {activeRows.length === 0 ? null : (
+            <span className={css.countChip} aria-label={`${activeRows.length} ${t('branch.tree.count')}`}>
+              x{activeRows.length}
+            </span>
+          )}
           {completedCount === 0 ? null : (
             <span
               className={css.completedDot}
@@ -690,9 +693,14 @@ export function SessionBranchList({
   const archivedForks = [...recordedEntries.values()].filter(entry =>
     archives.archivedSessionIds.includes(entry.childId))
   const [collapsed, setCollapsed] = useState<ReadonlySet<SessionId>>(() => new Set())
-  // Branch menus start collapsed on every load/restart; the set holds only the
-  // menus the user explicitly opened in this page session.
-  const [openMenus, setOpenMenus] = useState<ReadonlySet<SessionId>>(() => new Set())
+  // Expanded menus live in a page-process module store so collapsing a
+  // workspace (which unmounts the native rows and this portal) keeps them; a
+  // host restart or page reload starts with every menu collapsed.
+  const openMenus = useSyncExternalStore(
+    subscribeBranchMenus,
+    branchMenusSnapshot,
+    branchMenusSnapshot,
+  )
   const [hosts, setHosts] = useState<ReadonlyMap<SessionId, HTMLElement>>(() => new Map())
   // Show archived forks only while the native list itself shows archived rows
   // (workspace filter "show/only"). Under the default "hide archived" filter
@@ -713,16 +721,27 @@ export function SessionBranchList({
     () => branchGroups(state, recordedEntries, topics, statuses, index => `${t('branch.node.forkBadge')} ${index}`),
     [state, recordedEntries, topics, statuses, t],
   )
-  // A group with no live fork has no menu: its header, count and host placeholder
-  // must all disappear once the last fork is archived. Archived parents of live
-  // descendants stay in the model so those descendants remain reachable.
+  // A group with at least one live fork always shows its menu. A group whose
+  // forks are all archived shows the menu only while the native list itself
+  // shows archived rows ("all conversations" / "archived only"), where the
+  // restore section is meaningful. Archived parents of live descendants stay
+  // in the model so those descendants remain reachable.
   const archivedIdSet = useMemo(
     () => new Set(archives.archivedSessionIds),
     [archives],
   )
+  const archivedSourceIds = useMemo(() => {
+    const sources = new Set<SessionId>()
+    for (const entry of recordedEntries.values()) {
+      if (!archives.archivedSessionIds.includes(entry.childId)) continue
+      sources.add(forkSourceOf(entry, recordedEntries))
+    }
+    return sources
+  }, [archives, recordedEntries])
   const visibleGroups = useMemo(
-    () => groups.filter(group => group.rows.some(row => !archivedIdSet.has(row.sessionId))),
-    [groups, archivedIdSet],
+    () => groups.filter(group => group.rows.some(row => !archivedIdSet.has(row.sessionId))
+      || (archivedRowsVisible && archivedSourceIds.has(group.sourceId))),
+    [groups, archivedIdSet, archivedRowsVisible, archivedSourceIds],
   )
 
   const restoreHiddenRows = (): void => {
@@ -845,12 +864,7 @@ export function SessionBranchList({
   }
 
   const toggleMenu = (sessionId: SessionId): void => {
-    setOpenMenus(current => {
-      const next = new Set(current)
-      if (next.has(sessionId)) next.delete(sessionId)
-      else next.add(sessionId)
-      return next
-    })
+    toggleBranchMenu(sessionId)
   }
 
   return (

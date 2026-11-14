@@ -2,15 +2,19 @@
 
 ### Fixed
 
-- The inline fork menu now appears only while at least one live (unarchived)
-  fork exists. Archiving the last fork removes the header, its `xN` count and
-  the host placeholder instead of leaving a `x0` header; the native archived
-  list remains the restore entry.
-- Inline fork menus start collapsed on every page load and restart. Only the
-  menus the user opens in the current page stay expanded.
+- The inline fork menu follows the archived filter. With at least one live
+  fork it appears under every filter; when only archived forks remain it
+  appears under "all conversations" and "archived only" (where the restore
+  section is reachable), never under "hide archived" and never as a `x0`
+  header.
+- Inline fork menus start collapsed when the Host starts or restarts. Opening
+  a menu survives collapsing and re-expanding its workspace (the state lives
+  for the page process, not the component instance).
 - Collapse and expand now scale their duration with the measured content
   height (roughly 200–600 ms), so tall menus no longer snap shut at the fixed
-  160 ms speed.
+  160 ms speed. The menu uses one geometric fold: content no longer fades on a
+  separate timeline, and `overflow-anchor: none` keeps the native list from
+  pinning the sessions below while the menu shrinks.
 - A new fork opens with an empty composer. The selected or previous user
   prompt is no longer replayed into the child Session's editor.
 - Finished background forks show the Host's green completion dot; while the
