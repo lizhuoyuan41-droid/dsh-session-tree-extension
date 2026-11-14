@@ -1195,7 +1195,7 @@ describe('session tree browser plugin', () => {
     })
   })
 
-  it('moves an archived-only menu to the bottom of its workspace group', async () => {
+  it('keeps an archived-only menu directly under its parent Session row', async () => {
     const sourceId = sid('arch-source')
     const childId = sid('arch-child')
     const lineage = new SessionForkLineage()
@@ -1214,17 +1214,14 @@ describe('session tree browser plugin', () => {
       getSnapshot: () => archiveSnapshot,
       subscribe: () => () => {},
     }
-    // Two workspace sections under one native tree: the archived-only menu must
-    // land at the end of the source's own section, not under its Session row.
+    // Grouped workspace DOM: the menu must follow the source row, not jump to
+    // the end of its workspace section.
     const root = document.createElement('div')
     root.innerHTML = `<div role="tree">
       <div data-test-group="dv14">
         <div role="treeitem" aria-selected="false" data-row-key="session:arch-source">Archived source</div>
         <div role="treeitem" aria-selected="false" data-row-key="session:arch-child">Archived child</div>
         <button data-row-key="overflow:dv14">more</button>
-      </div>
-      <div data-test-group="dv13">
-        <div role="treeitem" aria-selected="false" data-row-key="session:other">Other</div>
       </div>
     </div>`
     document.body.append(root)
@@ -1247,10 +1244,10 @@ describe('session tree browser plugin', () => {
         return element!
       })
       const dv14 = root.querySelector<HTMLElement>('[data-test-group="dv14"]')!
+      const sourceRow = root.querySelector<HTMLElement>('[data-row-key="session:arch-source"]')!
       expect(host.parentElement).toBe(dv14)
-      expect(dv14.lastElementChild).toBe(host)
-      expect(host.previousElementSibling?.getAttribute('data-row-key')).toBe('overflow:dv14')
-      expect(root.querySelector('[data-test-group="dv13"]')?.contains(host)).toBe(false)
+      expect(host.previousElementSibling).toBe(sourceRow)
+      expect(dv14.lastElementChild).not.toBe(host)
       await screen.findByLabelText(`${zh['branch.archived.restore']} - Archived source · archived fork`)
     } finally {
       root.remove()
@@ -1273,8 +1270,6 @@ describe('session tree browser plugin', () => {
       vi.advanceTimersByTime(1)
       expect(scroller.style.overflowAnchor).toBe('')
 
-      // A second fold before the first restores must keep anchoring disabled
-      // until the latest fold ends.
       holdScrollAnchorDuring(menu, 200)
       holdScrollAnchorDuring(menu, 200)
       vi.advanceTimersByTime(259)

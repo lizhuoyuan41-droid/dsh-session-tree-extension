@@ -6,8 +6,7 @@
   fork it appears under every filter; when only archived forks remain it
   appears under "all conversations" and "archived only" (where the restore
   section is reachable), never under "hide archived" and never as a `x0`
-  header. An archived-only menu is appended to the bottom of its workspace
-  group instead of under the parent Session row.
+  header. Archived-only menus stay directly under their parent Session row.
 - Inline fork menus start collapsed when the Host starts or restarts. Opening
   a menu survives collapsing and re-expanding its workspace (the state lives
   for the page process, not the component instance).

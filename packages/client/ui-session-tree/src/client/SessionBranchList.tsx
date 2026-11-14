@@ -793,7 +793,6 @@ export function SessionBranchList({
       setArchivedRowsVisible(current => current === nextArchivedRowsVisible ? current : nextArchivedRowsVisible)
 
       const nextHosts = new Map<SessionId, HTMLElement>()
-      const archivedIds = new Set(archives.archivedSessionIds)
       for (const group of visibleGroups) {
         const sourceRow = rowById.get(group.sourceId)
         if (sourceRow === undefined || sourceRow.parentElement === null) continue
@@ -805,22 +804,9 @@ export function SessionBranchList({
           host.dataset.sessionTreeBranchHost = 'mounted'
         }
         host.dataset.sessionTreeBranchTarget = group.sourceId
-        const archivedOnly = group.rows.every(row => archivedIds.has(row.sessionId))
-        if (archivedOnly) {
-          // An archived-only menu is a workspace-level archive section, not a
-          // child of one Session row: append it at the end of its workspace.
-          const tree = sourceRow.closest('[role="tree"]')
-          let section: HTMLElement = sourceRow
-          while (tree !== null && section.parentElement !== null && section.parentElement !== tree) {
-            section = section.parentElement
-          }
-          if (tree !== null && section !== sourceRow && section.parentElement === tree) {
-            if (section.lastElementChild !== host) section.append(host)
-          } else if (host.previousElementSibling !== sourceRow) {
-            // Flat lists without workspace wrappers keep the row-local anchor.
-            sourceRow.parentElement.insertBefore(host, sourceRow.nextSibling)
-          }
-        } else if (
+        // Every menu, including an archived-only one, belongs directly under
+        // its own parent Session row.
+        if (
           host.parentElement !== sourceRow.parentElement
           || host.previousElementSibling !== sourceRow
         ) {
